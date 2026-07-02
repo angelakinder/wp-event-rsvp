@@ -244,9 +244,9 @@ class Band_Event_RSVP_Admin {
 
         $now_date = current_time( 'Y-m-d' );
         $now_time = current_time( 'H:i' );
-        $default_end_ts = current_time( 'timestamp' ) + HOUR_IN_SECONDS;
-        $default_end_date = wp_date( 'Y-m-d', $default_end_ts );
-        $default_end_time = wp_date( 'H:i', $default_end_ts );
+        $default_end_dt = current_datetime()->modify( '+1 hour' );
+        $default_end_date = $default_end_dt->format( 'Y-m-d' );
+        $default_end_time = $default_end_dt->format( 'H:i' );
         $start_date_value = isset( $_POST['band_event_start_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_start_date'] ) ) : $now_date;
         $start_time_value = isset( $_POST['band_event_start_time'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_start_time'] ) ) : $now_time;
         $end_date_value = isset( $_POST['band_event_end_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_end_date'] ) ) : $default_end_date;

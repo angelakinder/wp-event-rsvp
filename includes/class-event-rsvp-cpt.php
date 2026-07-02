@@ -5,12 +5,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 class Band_Event_RSVP_CPT {
+    const EVENT_BASE_SLUG = 'rsvp';
+
     public static function init() {
         add_action( 'init', array( __CLASS__, 'register_event_post_type' ) );
         add_action( 'add_meta_boxes', array( __CLASS__, 'add_event_meta_boxes' ) );
         add_action( 'save_post', array( __CLASS__, 'save_event_meta' ), 10, 2 );
         add_filter( 'manage_event_posts_columns', array( __CLASS__, 'set_custom_columns' ) );
         add_action( 'manage_event_posts_custom_column', array( __CLASS__, 'custom_column' ), 10, 2 );
+        add_filter( 'manage_edit-event_sortable_columns', array( __CLASS__, 'set_sortable_columns' ) );
+        add_action( 'pre_get_posts', array( __CLASS__, 'handle_admin_event_sorting' ) );
+        add_filter( 'post_type_link', array( __CLASS__, 'filter_event_permalink' ), 10, 2 );
     }
 
     public static function register_event_post_type() {
@@ -37,7 +42,7 @@ class Band_Event_RSVP_CPT {
             'show_in_menu'       => true,
             'supports'           => array( 'title', 'editor' ),
             'has_archive'        => true,
-            'rewrite'            => array( 'slug' => 'rsvp' ),
+            'rewrite'            => array( 'slug' => self::EVENT_BASE_SLUG ),
             'show_in_rest'       => true,
             'capability_type'    => 'post',
             'menu_position'      => 20,
@@ -45,6 +50,24 @@ class Band_Event_RSVP_CPT {
         );
 
         register_post_type( 'event', $args );
+
+        add_rewrite_rule(
+            '^' . self::EVENT_BASE_SLUG . '/([0-9]+)/?$',
+            'index.php?post_type=event&p=$matches[1]',
+            'top'
+        );
+    }
+
+    public static function filter_event_permalink( $post_link, $post ) {
+        if ( ! $post instanceof WP_Post || 'event' !== $post->post_type ) {
+            return $post_link;
+        }
+
+        if ( ! get_option( 'permalink_structure' ) ) {
+            return $post_link;
+        }
+
+        return home_url( user_trailingslashit( self::EVENT_BASE_SLUG . '/' . intval( $post->ID ) ) );
     }
 
     public static function add_event_meta_boxes() {
@@ -115,9 +138,9 @@ class Band_Event_RSVP_CPT {
                 $end_time = $end_dt->format( 'H:i' );
             }
         } else {
-            $default_end_ts = current_time( 'timestamp' ) + HOUR_IN_SECONDS;
-            $end_date = wp_date( 'Y-m-d', $default_end_ts );
-            $end_time = wp_date( 'H:i', $default_end_ts );
+            $default_end_dt = current_datetime()->modify( '+1 hour' );
+            $end_date = $default_end_dt->format( 'Y-m-d' );
+            $end_time = $default_end_dt->format( 'H:i' );
         }
         ?>
         <p>
@@ -227,6 +250,35 @@ class Band_Event_RSVP_CPT {
         return $options;
     }
 
+    protected static function resolve_wp_user_id_from_swpm_member( $member ) {
+        if ( ! is_object( $member ) ) {
+            return 0;
+        }
+
+        if ( isset( $member->wp_user_id ) ) {
+            $wp_user_id = absint( $member->wp_user_id );
+            if ( $wp_user_id > 0 && get_userdata( $wp_user_id ) ) {
+                return $wp_user_id;
+            }
+        }
+
+        if ( ! empty( $member->user_name ) ) {
+            $user = get_user_by( 'login', (string) $member->user_name );
+            if ( $user ) {
+                return intval( $user->ID );
+            }
+        }
+
+        if ( ! empty( $member->email ) ) {
+            $user = get_user_by( 'email', (string) $member->email );
+            if ( $user ) {
+                return intval( $user->ID );
+            }
+        }
+
+        return 0;
+    }
+
     public static function get_invited_membership_levels( $post_id ) {
         $levels = get_post_meta( $post_id, '_band_event_invited_levels', true );
         if ( ! is_array( $levels ) ) {
@@ -238,12 +290,19 @@ class Band_Event_RSVP_CPT {
     public static function get_all_member_user_ids() {
         if ( class_exists( 'SwpmMemberUtils' ) ) {
             global $wpdb;
-            $query = "SELECT member_id FROM {$wpdb->prefix}swpm_members_tbl";
+            $query = "SELECT wp_user_id, user_name, email FROM {$wpdb->prefix}swpm_members_tbl";
             $members = $wpdb->get_results( $query );
             if ( is_array( $members ) ) {
-                return array_values( array_filter( array_map( function( $row ) {
-                    return isset( $row->member_id ) ? intval( $row->member_id ) : 0;
-                }, $members ) ) );
+                $user_ids = array();
+
+                foreach ( $members as $member ) {
+                    $user_id = self::resolve_wp_user_id_from_swpm_member( $member );
+                    if ( $user_id > 0 ) {
+                        $user_ids[] = $user_id;
+                    }
+                }
+
+                return array_values( array_unique( $user_ids ) );
             }
         }
 
@@ -262,25 +321,21 @@ class Band_Event_RSVP_CPT {
                     continue;
                 }
                 foreach ( $members as $member ) {
-                    $user = null;
-                    if ( ! empty( $member->user_name ) ) {
-                        $user = get_user_by( 'login', $member->user_name );
-                    }
-                    if ( ! $user && ! empty( $member->email ) ) {
-                        $user = get_user_by( 'email', $member->email );
-                    }
-                    if ( $user ) {
-                        $invited_ids[] = intval( $user->ID );
+                    $user_id = self::resolve_wp_user_id_from_swpm_member( $member );
+                    if ( $user_id > 0 ) {
+                        $invited_ids[] = $user_id;
                     }
                 }
             }
+
+            return array_values( array_unique( $invited_ids ) );
         }
 
-        if ( empty( $invited_ids ) ) {
+        if ( empty( $levels ) ) {
             return self::get_all_member_user_ids();
         }
 
-        return array_values( array_unique( $invited_ids ) );
+        return array();
     }
 
     public static function save_event_meta( $post_id, $post ) {
@@ -412,6 +467,23 @@ class Band_Event_RSVP_CPT {
 
             if ( $series_total > 1 ) {
                 update_post_meta( $post_id, '_band_event_recurrence_total', $series_total );
+
+                $series_posts = get_posts( array(
+                    'post_type'      => 'event',
+                    'posts_per_page' => -1,
+                    'meta_query'     => array(
+                        array(
+                            'key'     => '_band_event_recurrence_id',
+                            'value'   => $series_id,
+                            'compare' => '=',
+                        ),
+                    ),
+                    'fields'         => 'ids',
+                ) );
+
+                foreach ( $series_posts as $series_post_id ) {
+                    update_post_meta( $series_post_id, '_band_event_recurrence_total', $series_total );
+                }
             }
         }
 
@@ -476,6 +548,29 @@ class Band_Event_RSVP_CPT {
                 }
                 break;
         }
+    }
+
+    public static function set_sortable_columns( $columns ) {
+        $columns['event_date'] = 'event_date';
+        return $columns;
+    }
+
+    public static function handle_admin_event_sorting( $query ) {
+        if ( ! is_admin() || ! $query->is_main_query() ) {
+            return;
+        }
+
+        if ( 'event' !== $query->get( 'post_type' ) ) {
+            return;
+        }
+
+        if ( 'event_date' !== $query->get( 'orderby' ) ) {
+            return;
+        }
+
+        $query->set( 'meta_key', '_band_event_start' );
+        $query->set( 'orderby', 'meta_value' );
+        $query->set( 'meta_type', 'DATETIME' );
     }
 
     public static function get_event_fields( $post_id ) {

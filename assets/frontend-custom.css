@@ -174,7 +174,6 @@
 
 .band-event-attendee-count {
   display: inline-block;
-  margin-left: 0.15rem;
   color: #6b7785;
   font-weight: 600;
 }
@@ -267,9 +266,9 @@
 .band-event-form input:focus,
 .band-event-form select:focus,
 .band-event-form textarea:focus {
-  outline: 2px solid #90b4d8;
+  outline: 2px solid rgba(206, 71, 55, 0.24);
   outline-offset: 0;
-  border-color: #6b93bd;
+  border-color: #ce4737;
 }
 
 .band-event-form .date-time-row {
@@ -287,14 +286,14 @@
 }
 
 .band-event-form .button.button-primary {
-  background: #2d6ea8;
-  border-color: #265e8f;
+  background: #ce4737;
+  border-color: #b53c2f;
   color: #fff;
 }
 
 .band-event-form .button.button-primary:hover {
-  background: #255b8a;
-  border-color: #1f4e76;
+  background: #b53c2f;
+  border-color: #983126;
 }
 
 .band-event-form + .notice {
@@ -313,7 +312,7 @@
 }
 
 .band-event-admin-edit {
-  color: #2d6ea8;
+  color: #ce4737;
 }
 
 .band-event-admin-delete {
@@ -322,6 +321,30 @@
 
 .band-event-admin-actions a:hover {
   text-decoration: underline;
+}
+
+/* Override remaining blue accents from base frontend.css */
+.band-event-data {
+  border-left-color: #ce4737;
+}
+
+.band-event-data li strong,
+.band-event-back a {
+  color: #ce4737;
+}
+
+.band-event-rsvp button {
+  background: #ce4737;
+}
+
+.band-event-rsvp button:hover {
+  background: #b53c2f;
+}
+
+.band-event-rsvp-button.active {
+  background-color: #ce4737;
+  border-color: #b53c2f;
+  box-shadow: 0 0 8px rgba(206, 71, 55, 0.35);
 }
 
 @media (max-width: 700px) {

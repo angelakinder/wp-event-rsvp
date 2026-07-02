@@ -38,10 +38,13 @@ if ( ! $events->have_posts() ) {
     while ( $events->have_posts() ) {
         $events->the_post();
         $post_id = get_the_ID();
+        if ( ! Band_Event_RSVP_Frontend::can_current_user_view_event( $post_id ) ) {
+            continue;
+        }
         $fields = Band_Event_RSVP_CPT::get_event_fields( $post_id );
         $title = get_the_title( $post_id );
-        $start = $fields['start'] ? date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $fields['start'] ) ) : esc_html__( 'No start time set', 'band-event-rsvp' );
-        $end = $fields['end'] ? date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $fields['end'] ) ) : esc_html__( 'No end time set', 'band-event-rsvp' );
+        $start = Band_Event_RSVP_Frontend::format_event_datetime_human( $fields['start'], esc_html__( 'No start time set', 'band-event-rsvp' ) );
+        $end = Band_Event_RSVP_Frontend::format_event_datetime_human( $fields['end'], esc_html__( 'No end time set', 'band-event-rsvp' ) );
         $location = $fields['location'] ? esc_html( $fields['location'] ) : esc_html__( 'No location set', 'band-event-rsvp' );
         $permalink = get_permalink( $post_id );
         $recurrence_note = '';
