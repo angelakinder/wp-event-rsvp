@@ -9,8 +9,109 @@ class Band_Event_RSVP_Frontend {
         add_shortcode( 'band_event_list', array( __CLASS__, 'render_event_list' ) );
         add_shortcode( 'band_event_detail', array( __CLASS__, 'render_event_detail' ) );
         add_action( 'wp', array( __CLASS__, 'handle_rsvp_submission' ) );
+        add_action( 'template_redirect', array( __CLASS__, 'handle_calendar_download' ) );
         add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_styles' ) );
+        add_action( 'pre_get_posts', array( __CLASS__, 'filter_event_archive_query' ) );
         add_filter( 'the_content', array( __CLASS__, 'render_single_event_content' ) );
+    }
+
+    public static function get_calendar_download_url( $post_id ) {
+        return add_query_arg(
+            array(
+                'band_event_calendar' => intval( $post_id ),
+                '_wpnonce'            => wp_create_nonce( 'band_event_calendar_' . intval( $post_id ) ),
+            ),
+            home_url( '/' )
+        );
+    }
+
+    public static function render_add_to_calendar_button( $post_id ) {
+        $url = self::get_calendar_download_url( $post_id );
+        return '<p class="band-event-calendar"><a class="band-event-calendar-link" href="' . esc_url( $url ) . '">' . esc_html__( 'Add to Calendar', 'band-event-rsvp' ) . '</a></p>';
+    }
+
+    public static function escape_ics_text( $text ) {
+        $text = str_replace( array( "\\", ";", ",", "\r\n", "\n", "\r" ), array( "\\\\", "\\;", "\\,", "\\n", "\\n", "\\n" ), (string) $text );
+        return $text;
+    }
+
+    public static function handle_calendar_download() {
+        if ( ! isset( $_GET['band_event_calendar'] ) ) {
+            return;
+        }
+
+        $post_id = absint( wp_unslash( $_GET['band_event_calendar'] ) );
+        if ( ! $post_id ) {
+            wp_die( esc_html__( 'Invalid event.', 'band-event-rsvp' ) );
+        }
+
+        if ( ! isset( $_GET['_wpnonce'] ) || ! wp_verify_nonce( wp_unslash( $_GET['_wpnonce'] ), 'band_event_calendar_' . $post_id ) ) {
+            wp_die( esc_html__( 'Invalid request.', 'band-event-rsvp' ) );
+        }
+
+        $post = get_post( $post_id );
+        if ( ! $post || 'event' !== $post->post_type ) {
+            wp_die( esc_html__( 'Event not found.', 'band-event-rsvp' ) );
+        }
+
+        $fields = Band_Event_RSVP_CPT::get_event_fields( $post_id );
+        $start_raw = ! empty( $fields['start'] ) ? (string) $fields['start'] : '';
+        $end_raw = ! empty( $fields['end'] ) ? (string) $fields['end'] : '';
+        if ( '' === $start_raw ) {
+            wp_die( esc_html__( 'Event start date is missing.', 'band-event-rsvp' ) );
+        }
+
+        try {
+            $tz = wp_timezone();
+            $start_dt = new DateTimeImmutable( $start_raw, $tz );
+            $end_dt = '' !== $end_raw ? new DateTimeImmutable( $end_raw, $tz ) : $start_dt->modify( '+1 hour' );
+            if ( $end_dt <= $start_dt ) {
+                $end_dt = $start_dt->modify( '+1 hour' );
+            }
+        } catch ( Exception $e ) {
+            wp_die( esc_html__( 'Event date is invalid.', 'band-event-rsvp' ) );
+        }
+
+        $start_utc = $start_dt->setTimezone( new DateTimeZone( 'UTC' ) );
+        $end_utc = $end_dt->setTimezone( new DateTimeZone( 'UTC' ) );
+
+        $host = wp_parse_url( home_url(), PHP_URL_HOST );
+        $uid = 'band-event-' . $post_id . '@' . ( $host ? $host : 'localhost' );
+
+        $summary = self::escape_ics_text( get_the_title( $post_id ) );
+        $description = self::escape_ics_text( wp_strip_all_tags( $post->post_content ) );
+        $location = self::escape_ics_text( (string) $fields['location'] );
+        $url = esc_url_raw( get_permalink( $post_id ) );
+        $dtstamp = gmdate( 'Ymd\THis\Z' );
+
+        $ics = "BEGIN:VCALENDAR\r\n";
+        $ics .= "VERSION:2.0\r\n";
+        $ics .= "PRODID:-//Simple RSVP//Event Export//EN\r\n";
+        $ics .= "CALSCALE:GREGORIAN\r\n";
+        $ics .= "METHOD:PUBLISH\r\n";
+        $ics .= "BEGIN:VEVENT\r\n";
+        $ics .= 'UID:' . $uid . "\r\n";
+        $ics .= 'DTSTAMP:' . $dtstamp . "\r\n";
+        $ics .= 'DTSTART:' . $start_utc->format( 'Ymd\THis\Z' ) . "\r\n";
+        $ics .= 'DTEND:' . $end_utc->format( 'Ymd\THis\Z' ) . "\r\n";
+        $ics .= 'SUMMARY:' . $summary . "\r\n";
+        if ( '' !== $description ) {
+            $ics .= 'DESCRIPTION:' . $description . "\r\n";
+        }
+        if ( '' !== $location ) {
+            $ics .= 'LOCATION:' . $location . "\r\n";
+        }
+        if ( '' !== $url ) {
+            $ics .= 'URL:' . $url . "\r\n";
+        }
+        $ics .= "END:VEVENT\r\n";
+        $ics .= "END:VCALENDAR\r\n";
+
+        nocache_headers();
+        header( 'Content-Type: text/calendar; charset=utf-8' );
+        header( 'Content-Disposition: attachment; filename="event-' . $post_id . '.ics"' );
+        echo $ics;
+        exit;
     }
 
     public static function get_current_member_status() {
@@ -25,6 +126,59 @@ class Band_Event_RSVP_Frontend {
         wp_enqueue_style( 'band-event-frontend' );
         wp_register_style( 'band-event-frontend-custom', BAND_EVENT_RSVP_URL . 'assets/frontend-custom.css', array( 'band-event-frontend' ), BAND_EVENT_RSVP_VERSION );
         wp_enqueue_style( 'band-event-frontend-custom' );
+        wp_enqueue_script( 'band-event-datetime-sync', BAND_EVENT_RSVP_URL . 'assets/datetime-sync.js', array(), BAND_EVENT_RSVP_VERSION, true );
+    }
+
+    public static function get_upcoming_event_meta_query( $today_midnight ) {
+        return array(
+            'relation' => 'OR',
+            array(
+                'key'     => '_band_event_end',
+                'value'   => $today_midnight,
+                'compare' => '>=',
+                'type'    => 'DATETIME',
+            ),
+            array(
+                'relation' => 'AND',
+                array(
+                    'key'     => '_band_event_end',
+                    'value'   => '',
+                    'compare' => '=',
+                ),
+                array(
+                    'key'     => '_band_event_start',
+                    'value'   => $today_midnight,
+                    'compare' => '>=',
+                    'type'    => 'DATETIME',
+                ),
+            ),
+            array(
+                'relation' => 'AND',
+                array(
+                    'key'     => '_band_event_end',
+                    'compare' => 'NOT EXISTS',
+                ),
+                array(
+                    'key'     => '_band_event_start',
+                    'value'   => $today_midnight,
+                    'compare' => '>=',
+                    'type'    => 'DATETIME',
+                ),
+            ),
+        );
+    }
+
+    public static function filter_event_archive_query( $query ) {
+        if ( is_admin() || ! $query->is_main_query() || ! $query->is_post_type_archive( 'event' ) ) {
+            return;
+        }
+
+        $today_midnight = date( 'Y-m-d 00:00:00', current_time( 'timestamp' ) );
+
+        $query->set( 'orderby', 'meta_value' );
+        $query->set( 'meta_key', '_band_event_start' );
+        $query->set( 'order', 'ASC' );
+        $query->set( 'meta_query', self::get_upcoming_event_meta_query( $today_midnight ) );
     }
 
     public static function render_event_list( $atts ) {
@@ -41,14 +195,7 @@ class Band_Event_RSVP_Frontend {
             'orderby'        => 'meta_value',
             'meta_key'       => '_band_event_start',
             'order'          => 'ASC',
-            'meta_query'     => array(
-                array(
-                    'key'     => '_band_event_start',
-                    'value'   => $today_midnight,
-                    'compare' => '>=',
-                    'type'    => 'DATETIME',
-                ),
-            ),
+            'meta_query'     => self::get_upcoming_event_meta_query( $today_midnight ),
         ) );
 
         if ( ! $events->have_posts() ) {
@@ -109,6 +256,7 @@ class Band_Event_RSVP_Frontend {
             $output .= '<span class="band-event-recurring">' . esc_html( $recurrence_note ) . '</span>';
         }
         $output .= '</a>';
+        $output .= self::render_add_to_calendar_button( $post_id );
 
         if ( ! self::is_event_in_past( $fields['start'] ) && self::get_current_member_status() ) {
             $output .= self::render_event_list_rsvp( $post_id );
@@ -190,6 +338,7 @@ class Band_Event_RSVP_Frontend {
             }
         }
         $output .= '</ul>';
+        $output .= self::render_add_to_calendar_button( $post_id );
         $output .= self::render_rsvp_section( $post_id );
         $output .= self::render_attendee_list( $post_id );
         $output .= '</div>';
@@ -274,7 +423,7 @@ class Band_Event_RSVP_Frontend {
             foreach ( $grouped['yes'] as $response ) {
                 $output .= '<li>' . esc_html( $response['display_name'] );
                 if ( ! empty( $response['comment'] ) ) {
-                    $output .= ' — ' . esc_html( $response['comment'] );
+                    $output .= ' - ' . esc_html( $response['comment'] );
                 }
                 $output .= '</li>';
             }
@@ -289,7 +438,7 @@ class Band_Event_RSVP_Frontend {
             foreach ( $grouped['maybe'] as $response ) {
                 $output .= '<li>' . esc_html( $response['display_name'] );
                 if ( ! empty( $response['comment'] ) ) {
-                    $output .= ' — ' . esc_html( $response['comment'] );
+                    $output .= ' - ' . esc_html( $response['comment'] );
                 }
                 $output .= '</li>';
             }
@@ -304,7 +453,7 @@ class Band_Event_RSVP_Frontend {
             foreach ( $grouped['no'] as $response ) {
                 $output .= '<li>' . esc_html( $response['display_name'] );
                 if ( ! empty( $response['comment'] ) ) {
-                    $output .= ' — ' . esc_html( $response['comment'] );
+                    $output .= ' - ' . esc_html( $response['comment'] );
                 }
                 $output .= '</li>';
             }
@@ -424,7 +573,7 @@ class Band_Event_RSVP_Frontend {
         }
 
         $event_detail = self::render_event_detail_content( $post_id );
-        // Avoid duplicating the post content (description) — the event detail includes it.
+        // Avoid duplicating the post content (description) - the event detail includes it.
         return $rsvp_msg . $event_detail;
     }
 }

@@ -306,6 +306,14 @@ class Band_Event_RSVP_CPT {
             $end = sanitize_text_field( wp_unslash( $_POST['band_event_end'] ) );
         }
 
+        if ( ! empty( $start ) && ! empty( $end ) ) {
+            $start_ts = strtotime( $start );
+            $end_ts = strtotime( $end );
+            if ( false !== $start_ts && false !== $end_ts && $end_ts <= $start_ts ) {
+                return;
+            }
+        }
+
         $recurring_count = isset( $_POST['band_event_recurring_count'] ) ? intval( $_POST['band_event_recurring_count'] ) : 0;
         $recurring_unit  = isset( $_POST['band_event_recurring_unit'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurring_unit'] ) ) : 'none';
         $recurrence_occurrences = isset( $_POST['band_event_recurrence_occurrences'] ) ? intval( $_POST['band_event_recurrence_occurrences'] ) : 0;

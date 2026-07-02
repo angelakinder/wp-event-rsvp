@@ -174,6 +174,7 @@ class Band_Event_RSVP_Admin {
             global $post_type;
             if ( 'event' === $post_type ) {
                 wp_enqueue_style( 'band-event-admin', BAND_EVENT_RSVP_URL . 'assets/admin.css', array(), BAND_EVENT_RSVP_VERSION );
+                wp_enqueue_script( 'band-event-datetime-sync', BAND_EVENT_RSVP_URL . 'assets/datetime-sync.js', array(), BAND_EVENT_RSVP_VERSION, true );
             }
         }
 
@@ -274,6 +275,14 @@ class Band_Event_RSVP_Admin {
             $end = sanitize_text_field( wp_unslash( $_POST['band_event_end'] ) );
         }
 
+        if ( ! empty( $start ) && ! empty( $end ) ) {
+            $start_ts = strtotime( $start );
+            $end_ts = strtotime( $end );
+            if ( false !== $start_ts && false !== $end_ts && $end_ts <= $start_ts ) {
+                return '<p>' . esc_html__( 'End date/time must be after start date/time.', 'band-event-rsvp' ) . '</p>';
+            }
+        }
+
         $post_id = wp_insert_post( array(
             'post_title'   => $title,
             'post_content' => isset( $_POST['band_event_description'] ) ? sanitize_textarea_field( wp_unslash( $_POST['band_event_description'] ) ) : '',
@@ -332,6 +341,23 @@ class Band_Event_RSVP_Admin {
 
             if ( $series_total > 1 ) {
                 update_post_meta( $post_id, '_band_event_recurrence_total', $series_total );
+
+                $series_posts = get_posts( array(
+                    'post_type'      => 'event',
+                    'posts_per_page' => -1,
+                    'meta_query'     => array(
+                        array(
+                            'key'     => '_band_event_recurrence_id',
+                            'value'   => $series_id,
+                            'compare' => '=',
+                        ),
+                    ),
+                    'fields'         => 'ids',
+                ) );
+
+                foreach ( $series_posts as $series_post_id ) {
+                    update_post_meta( $series_post_id, '_band_event_recurrence_total', $series_total );
+                }
             }
         }
 
@@ -443,6 +469,7 @@ class Band_Event_RSVP_Admin {
             update_post_meta( $next_post_id, '_band_event_contact_person', $contact );
             update_post_meta( $next_post_id, '_band_event_recurrence_id', $series_id );
             update_post_meta( $next_post_id, '_band_event_recurrence_index', $index );
+            update_post_meta( $next_post_id, '_band_event_recurrence_total', 0 );
             if ( ! empty( $end_date ) ) {
                 update_post_meta( $next_post_id, '_band_event_recurrence_end_date', $end_date );
             }
@@ -512,7 +539,7 @@ class Band_Event_RSVP_Admin {
         ) );
 
         foreach ( $events as $event_id ) {
-            wp_delete_post( $event_id, true );
+            wp_delete_post( $event_id, false );
         }
 
         $redirect = wp_get_referer() ? wp_get_referer() : admin_url( 'edit.php?post_type=event' );

@@ -1,4 +1,28 @@
 /* Custom RSVP selected-button colors */
+.band-event-rsvp-buttons .band-event-rsvp-button,
+.band-event-rsvp-buttons-large .band-event-rsvp-button,
+.band-event-rsvp-form-inline .band-event-rsvp-button {
+  background-color: #e3e6ea;
+  color: #2f3841;
+  border-color: #b8c0c8;
+  box-shadow: none;
+}
+
+.band-event-rsvp-buttons .band-event-rsvp-button:hover,
+.band-event-rsvp-buttons-large .band-event-rsvp-button:hover,
+.band-event-rsvp-form-inline .band-event-rsvp-button:hover {
+  background-color: #d7dde3;
+  border-color: #a8b2bc;
+}
+
+.band-event-rsvp textarea,
+.band-event-rsvp-form textarea,
+.band-event-rsvp-form-inline textarea {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
 .band-event-rsvp-button-yes.active {
   background-color: #27ae60;
   color: #fff;
@@ -18,15 +42,57 @@
   box-shadow: 0 0 10px rgba(231,76,60,0.3);
 }
 
+.band-event-calendar {
+  margin: 0.75rem 1.5rem 1rem;
+}
+
+.band-event-detail .band-event-calendar {
+  margin: 0.75rem 0 1.25rem;
+}
+
+.band-event-calendar-link {
+  display: inline-block;
+  padding: 0.45rem 0.8rem;
+  background: #e3e6ea;
+  color: #2f3841;
+  border: 1px solid #b8c0c8;
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.band-event-calendar-link:hover {
+  background: #d7dde3;
+  border-color: #a8b2bc;
+}
+
 /* Limit attendee list height and allow scrolling for long lists */
 .band-event-attendees {
+  background: #eceff3;
+  border-color: #cfd6dd;
   max-height: 420px;
   overflow-y: auto;
 }
 
+.band-event-attendees-yes li:before {
+  content: "\2713";
+  color: #27ae60;
+}
+
+.band-event-attendees-maybe li:before {
+  content: "?";
+  color: #d4ac0d;
+}
+
+.band-event-attendees-no li:before {
+  content: "\00d7";
+  color: #c0392b;
+}
+
 .band-event-attendees-group {
-  max-height: 240px;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 @media (max-width: 700px) {
@@ -34,6 +100,6 @@
     max-height: 260px;
   }
   .band-event-attendees-group {
-    max-height: 160px;
+    max-height: none;
   }
 }
