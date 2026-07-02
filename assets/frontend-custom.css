@@ -1,0 +1,39 @@
+/* Custom RSVP selected-button colors */
+.band-event-rsvp-button-yes.active {
+  background-color: #27ae60;
+  color: #fff;
+  border-color: #1e8449;
+  box-shadow: 0 0 10px rgba(39,174,96,0.35);
+}
+.band-event-rsvp-button-maybe.active {
+  background-color: #f1c40f;
+  color: #111;
+  border-color: #d4ac0d;
+  box-shadow: 0 0 10px rgba(241,196,15,0.25);
+}
+.band-event-rsvp-button-no.active {
+  background-color: #e74c3c;
+  color: #fff;
+  border-color: #c0392b;
+  box-shadow: 0 0 10px rgba(231,76,60,0.3);
+}
+
+/* Limit attendee list height and allow scrolling for long lists */
+.band-event-attendees {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.band-event-attendees-group {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+@media (max-width: 700px) {
+  .band-event-attendees {
+    max-height: 260px;
+  }
+  .band-event-attendees-group {
+    max-height: 160px;
+  }
+}
