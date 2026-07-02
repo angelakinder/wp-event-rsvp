@@ -5,13 +5,16 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 class Band_Event_RSVP_Admin {
+    const MAX_RECURRING_EVENTS = 104;
+    const OPTION_SHOW_LOCATION_MAP = 'band_event_show_location_map';
+
     public static function init() {
         add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_admin_assets' ) );
         add_action( 'admin_menu', array( __CLASS__, 'add_admin_menu' ) );
         add_action( 'admin_init', array( __CLASS__, 'register_settings' ) );
         add_action( 'admin_init', array( __CLASS__, 'handle_recurrence_actions' ) );
         add_filter( 'post_row_actions', array( __CLASS__, 'add_recurrence_row_actions' ), 10, 2 );
-        add_shortcode( 'band_event_admin_form', array( __CLASS__, 'render_frontend_event_form' ) );
+        add_shortcode( 'simple_rsvp_event_manager', array( __CLASS__, 'render_frontend_event_form' ) );
     }
 
     public static function register_settings() {
@@ -44,6 +47,16 @@ class Band_Event_RSVP_Admin {
                 'default'      => 'all_invited',
             )
         );
+
+        register_setting(
+            'band_event_rsvp_settings',
+            self::OPTION_SHOW_LOCATION_MAP,
+            array(
+                'type'              => 'boolean',
+                'sanitize_callback' => array( __CLASS__, 'sanitize_show_location_map' ),
+                'default'           => false,
+            )
+        );
     }
 
     public static function sanitize_reminder_hours( $value ) {
@@ -58,6 +71,10 @@ class Band_Event_RSVP_Admin {
     public static function sanitize_reminder_target( $value ) {
         $allowed = array( 'all_invited', 'tentative_or_unanswered' );
         return in_array( $value, $allowed, true ) ? $value : 'all_invited';
+    }
+
+    public static function sanitize_show_location_map( $value ) {
+        return boolval( $value );
     }
 
     public static function add_admin_menu() {
@@ -75,6 +92,7 @@ class Band_Event_RSVP_Admin {
         $enabled = get_option( Band_Event_RSVP_Reminder::OPTION_ENABLED, true );
         $hours = get_option( Band_Event_RSVP_Reminder::OPTION_HOURS, 24 );
         $target = get_option( Band_Event_RSVP_Reminder::OPTION_TARGET, 'all_invited' );
+        $show_location_map = get_option( self::OPTION_SHOW_LOCATION_MAP, false );
         if ( 'all_responded' === $target ) {
             $target = 'all_invited';
         }
@@ -119,6 +137,14 @@ class Band_Event_RSVP_Admin {
                                 <p class="description"><?php esc_html_e( 'Reminder emails are sent by WordPress cron hourly.', 'band-event-rsvp' ); ?></p>
                             </td>
                         </tr>
+                        <tr>
+                            <th scope="row"><label for="band_event_show_location_map"><?php esc_html_e( 'Show location map', 'band-event-rsvp' ); ?></label></th>
+                            <td>
+                                <input type="hidden" name="band_event_show_location_map" value="0" />
+                                <input type="checkbox" id="band_event_show_location_map" name="band_event_show_location_map" value="1" <?php checked( $show_location_map, true ); ?> />
+                                <p class="description"><?php esc_html_e( 'Display a map below event details on single event pages when location is set.', 'band-event-rsvp' ); ?></p>
+                            </td>
+                        </tr>
                     </table>
 
                     <?php submit_button(); ?>
@@ -132,23 +158,47 @@ class Band_Event_RSVP_Admin {
                     <p><?php esc_html_e( 'Displays all upcoming events with expandable details:', 'band-event-rsvp' ); ?></p>
                     <code>[band_event_list posts_per_page="10"]</code>
                     <ul>
-                        <li><strong>posts_per_page</strong> — Number of events to display (default: 10)</li>
+                        <li><strong>posts_per_page</strong> - Number of events to display (default: 10)</li>
+                    </ul>
+
+                    <h3><?php esc_html_e( 'Event Actions (for Query Loop)', 'band-event-rsvp' ); ?></h3>
+                    <p><?php esc_html_e( 'Use this inside a Query Loop item to render calendar/admin/RSVP controls for each event post:', 'band-event-rsvp' ); ?></p>
+                    <code>[band_event_actions]</code>
+                    <ul>
+                        <li><strong>id</strong> - Optional explicit event post ID (default: current loop post)</li>
+                        <li><strong>show_calendar</strong> - 1 or 0 (default: 1)</li>
+                        <li><strong>show_admin</strong> - 1 or 0 (default: 1)</li>
+                        <li><strong>show_rsvp</strong> - 1 or 0 (default: 1)</li>
+                    </ul>
+
+                    <h3><?php esc_html_e( 'Modular Event Field Shortcodes', 'band-event-rsvp' ); ?></h3>
+                    <p><?php esc_html_e( 'These can be used in both single-event and index/query-loop templates. Each shortcode accepts optional id="123" and defaults to the current event in context.', 'band-event-rsvp' ); ?></p>
+                    <ul>
+                        <li><code>[band_event_start_datetime]</code> - Start date/time</li>
+                        <li><code>[band_event_end_datetime]</code> - End date/time</li>
+                        <li><code>[band_event_member_levels]</code> - Invited member levels</li>
+                        <li><code>[band_event_calendar_button]</code> - Add to Calendar button</li>
+                        <li><code>[band_event_admin_tools]</code> - Edit/Delete admin links (permission-based)</li>
+                        <li><code>[band_event_contact_name]</code> - Contact person name</li>
+                        <li><code>[band_event_rsvp_buttons]</code> - RSVP form/buttons</li>
+                        <li><code>[band_event_attendee_dropdowns]</code> - Attendee accordions/dropdowns</li>
                     </ul>
 
                     <h3><?php esc_html_e( 'Single Event Detail', 'band-event-rsvp' ); ?></h3>
                     <p><?php esc_html_e( 'Displays a single event with full details and RSVP form (used automatically on event pages):', 'band-event-rsvp' ); ?></p>
                     <code>[band_event_detail id="123"]</code>
                     <ul>
-                        <li><strong>id</strong> — Event post ID (required)</li>
+                        <li><strong>id</strong> - Event post ID (required)</li>
                     </ul>
 
                     <h3><?php esc_html_e( 'Admin Event Creation Form', 'band-event-rsvp' ); ?></h3>
                     <p><?php esc_html_e( 'Allows admins to create events from the front-end:', 'band-event-rsvp' ); ?></p>
-                    <code>[band_event_admin_form]</code>
+                    <code>[simple_rsvp_event_manager]</code>
 
                     <h3><?php esc_html_e( 'Template Loading', 'band-event-rsvp' ); ?></h3>
-                    <p><?php esc_html_e( 'The plugin automatically loads the event archive template from the plugin.', 'band-event-rsvp' ); ?></p>
-                    <p><?php esc_html_e( 'To override it in your theme, create: your-theme/band-event-rsvp/archive-event.php', 'band-event-rsvp' ); ?></p>
+                    <p><?php esc_html_e( 'The shortcode outputs only the event list markup inside your page content.', 'band-event-rsvp' ); ?></p>
+                    <p><?php esc_html_e( 'Header and footer are controlled by your active theme/page template.', 'band-event-rsvp' ); ?></p>
+                    <p><?php esc_html_e( 'To customize the list markup, create: your-theme/band-event-rsvp/list.php', 'band-event-rsvp' ); ?></p>
 
                     <h2><?php esc_html_e( 'Member Access', 'band-event-rsvp' ); ?></h2>
                     <p><?php esc_html_e( 'Only logged-in Simple Membership members can view detailed event information and RSVP to events.', 'band-event-rsvp' ); ?></p>
@@ -194,16 +244,31 @@ class Band_Event_RSVP_Admin {
 
         $now_date = current_time( 'Y-m-d' );
         $now_time = current_time( 'H:i' );
+        $default_end_ts = current_time( 'timestamp' ) + HOUR_IN_SECONDS;
+        $default_end_date = wp_date( 'Y-m-d', $default_end_ts );
+        $default_end_time = wp_date( 'H:i', $default_end_ts );
         $start_date_value = isset( $_POST['band_event_start_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_start_date'] ) ) : $now_date;
         $start_time_value = isset( $_POST['band_event_start_time'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_start_time'] ) ) : $now_time;
-        $end_date_value = isset( $_POST['band_event_end_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_end_date'] ) ) : $now_date;
-        $end_time_value = isset( $_POST['band_event_end_time'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_end_time'] ) ) : $now_time;
+        $end_date_value = isset( $_POST['band_event_end_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_end_date'] ) ) : $default_end_date;
+        $end_time_value = isset( $_POST['band_event_end_time'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_end_time'] ) ) : $default_end_time;
         $recurring_count_value = isset( $_POST['band_event_recurring_count'] ) ? intval( wp_unslash( $_POST['band_event_recurring_count'] ) ) : 0;
         $recurring_unit_value = isset( $_POST['band_event_recurring_unit'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurring_unit'] ) ) : 'none';
         $recurrence_occurrences_value = isset( $_POST['band_event_recurrence_occurrences'] ) ? intval( wp_unslash( $_POST['band_event_recurrence_occurrences'] ) ) : 0;
+        $recurrence_occurrences_value = min( self::MAX_RECURRING_EVENTS, max( 0, $recurrence_occurrences_value ) );
         $recurrence_end_date_value = isset( $_POST['band_event_recurrence_end_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurrence_end_date'] ) ) : '';
         $contact_value = isset( $_POST['band_event_contact_person'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_contact_person'] ) ) : '';
         $contact_options = class_exists( 'Band_Event_RSVP_CPT' ) ? Band_Event_RSVP_CPT::get_contact_person_options() : array();
+
+        if ( empty( $contact_value ) && is_user_logged_in() ) {
+            $current_user = wp_get_current_user();
+            if ( $current_user instanceof WP_User ) {
+                $default_contact = trim( (string) $current_user->first_name . ' ' . (string) $current_user->last_name );
+                if ( empty( $default_contact ) ) {
+                    $default_contact = (string) $current_user->user_login;
+                }
+                $contact_value = sanitize_text_field( $default_contact );
+            }
+        }
 
         $output = '';
         $output .= '<form method="post" class="band-event-form">';
@@ -220,7 +285,7 @@ class Band_Event_RSVP_Admin {
         $output .= '<div class="date-time-field"><label>' . esc_html__( 'End Time', 'band-event-rsvp' ) . '<br /><input type="time" name="band_event_end_time" class="widefat" value="' . esc_attr( $end_time_value ) . '"></label></div>';
         $output .= '</div>';
         $output .= '<p><label>' . esc_html__( 'Recurring every', 'band-event-rsvp' ) . '<br /><input type="number" name="band_event_recurring_count" min="0" class="small-text" value="' . esc_attr( $recurring_count_value ) . '"> <select name="band_event_recurring_unit"><option value="none"' . selected( $recurring_unit_value, 'none', false ) . '>' . esc_html__( 'None', 'band-event-rsvp' ) . '</option><option value="days"' . selected( $recurring_unit_value, 'days', false ) . '>' . esc_html__( 'Days', 'band-event-rsvp' ) . '</option><option value="weeks"' . selected( $recurring_unit_value, 'weeks', false ) . '>' . esc_html__( 'Weeks', 'band-event-rsvp' ) . '</option><option value="months"' . selected( $recurring_unit_value, 'months', false ) . '>' . esc_html__( 'Months', 'band-event-rsvp' ) . '</option></select></label></p>';
-        $output .= '<p><label>' . esc_html__( 'Number of occurrences', 'band-event-rsvp' ) . '<br /><input type="number" name="band_event_recurrence_occurrences" min="2" class="small-text" value="' . esc_attr( $recurrence_occurrences_value ) . '"></label></p>';
+        $output .= '<p><label>' . esc_html__( 'Number of occurrences', 'band-event-rsvp' ) . '<br /><input type="number" name="band_event_recurrence_occurrences" min="2" max="' . esc_attr( self::MAX_RECURRING_EVENTS ) . '" class="small-text" value="' . esc_attr( $recurrence_occurrences_value ) . '"></label></p>';
         $output .= '<p><label>' . esc_html__( 'Or end date', 'band-event-rsvp' ) . '<br /><input type="date" name="band_event_recurrence_end_date" class="widefat" value="' . esc_attr( $recurrence_end_date_value ) . '" /></label></p>';
         if ( ! empty( $contact_options ) ) {
             $output .= '<p><label>' . esc_html__( 'Contact Person', 'band-event-rsvp' ) . '<br />';
@@ -275,6 +340,17 @@ class Band_Event_RSVP_Admin {
             $end = sanitize_text_field( wp_unslash( $_POST['band_event_end'] ) );
         }
 
+        if ( empty( $start ) ) {
+            $start = current_time( 'Y-m-d H:i' );
+        }
+
+        if ( empty( $end ) ) {
+            $end_ts = strtotime( $start );
+            if ( false !== $end_ts ) {
+                $end = wp_date( 'Y-m-d H:i', $end_ts + HOUR_IN_SECONDS );
+            }
+        }
+
         if ( ! empty( $start ) && ! empty( $end ) ) {
             $start_ts = strtotime( $start );
             $end_ts = strtotime( $end );
@@ -298,8 +374,20 @@ class Band_Event_RSVP_Admin {
         $recurring_count = isset( $_POST['band_event_recurring_count'] ) ? intval( wp_unslash( $_POST['band_event_recurring_count'] ) ) : 0;
         $recurring_unit = isset( $_POST['band_event_recurring_unit'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurring_unit'] ) ) : 'none';
         $recurrence_occurrences = isset( $_POST['band_event_recurrence_occurrences'] ) ? intval( wp_unslash( $_POST['band_event_recurrence_occurrences'] ) ) : 0;
+        $recurrence_occurrences = min( self::MAX_RECURRING_EVENTS, max( 0, $recurrence_occurrences ) );
         $recurrence_end_date = isset( $_POST['band_event_recurrence_end_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurrence_end_date'] ) ) : '';
         $contact = isset( $_POST['band_event_contact_person'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_contact_person'] ) ) : '';
+
+        if ( empty( $contact ) && is_user_logged_in() ) {
+            $current_user = wp_get_current_user();
+            if ( $current_user instanceof WP_User ) {
+                $default_contact = trim( (string) $current_user->first_name . ' ' . (string) $current_user->last_name );
+                if ( empty( $default_contact ) ) {
+                    $default_contact = (string) $current_user->user_login;
+                }
+                $contact = sanitize_text_field( $default_contact );
+            }
+        }
 
         if ( 'none' !== $recurring_unit && empty( $start ) ) {
             return '<p>' . esc_html__( 'Recurring events require a start date/time.', 'band-event-rsvp' ) . '</p>';
@@ -393,7 +481,7 @@ class Band_Event_RSVP_Admin {
             return 1;
         }
 
-        $max_generated_posts = 50;
+        $max_generated_posts = max( 0, self::MAX_RECURRING_EVENTS - 1 );
 
         try {
             $current_start = new DateTime( $start );

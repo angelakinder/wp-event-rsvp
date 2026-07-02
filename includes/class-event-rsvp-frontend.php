@@ -8,6 +8,15 @@ class Band_Event_RSVP_Frontend {
     public static function init() {
         add_shortcode( 'band_event_list', array( __CLASS__, 'render_event_list' ) );
         add_shortcode( 'band_event_detail', array( __CLASS__, 'render_event_detail' ) );
+        add_shortcode( 'band_event_actions', array( __CLASS__, 'render_event_actions' ) );
+        add_shortcode( 'band_event_start_datetime', array( __CLASS__, 'render_event_start_datetime_shortcode' ) );
+        add_shortcode( 'band_event_end_datetime', array( __CLASS__, 'render_event_end_datetime_shortcode' ) );
+        add_shortcode( 'band_event_member_levels', array( __CLASS__, 'render_event_member_levels_shortcode' ) );
+        add_shortcode( 'band_event_calendar_button', array( __CLASS__, 'render_event_calendar_button_shortcode' ) );
+        add_shortcode( 'band_event_admin_tools', array( __CLASS__, 'render_event_admin_tools_shortcode' ) );
+        add_shortcode( 'band_event_contact_name', array( __CLASS__, 'render_event_contact_name_shortcode' ) );
+        add_shortcode( 'band_event_rsvp_buttons', array( __CLASS__, 'render_event_rsvp_buttons_shortcode' ) );
+        add_shortcode( 'band_event_attendee_dropdowns', array( __CLASS__, 'render_event_attendee_dropdowns_shortcode' ) );
         add_action( 'wp', array( __CLASS__, 'handle_rsvp_submission' ) );
         add_action( 'template_redirect', array( __CLASS__, 'handle_calendar_download' ) );
         add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_styles' ) );
@@ -129,6 +138,28 @@ class Band_Event_RSVP_Frontend {
         wp_enqueue_script( 'band-event-datetime-sync', BAND_EVENT_RSVP_URL . 'assets/datetime-sync.js', array(), BAND_EVENT_RSVP_VERSION, true );
     }
 
+    public static function render_template( $template_name, $args = array() ) {
+        $template_path = locate_template( array( 'band-event-rsvp/' . $template_name ) );
+        if ( empty( $template_path ) ) {
+            $plugin_template = BAND_EVENT_RSVP_DIR . 'templates/' . $template_name;
+            if ( file_exists( $plugin_template ) ) {
+                $template_path = $plugin_template;
+            }
+        }
+
+        if ( empty( $template_path ) ) {
+            return '';
+        }
+
+        if ( ! empty( $args ) && is_array( $args ) ) {
+            extract( $args, EXTR_SKIP );
+        }
+
+        ob_start();
+        include $template_path;
+        return ob_get_clean();
+    }
+
     public static function get_upcoming_event_meta_query( $today_midnight ) {
         return array(
             'relation' => 'OR',
@@ -186,6 +217,11 @@ class Band_Event_RSVP_Frontend {
             'posts_per_page' => 10,
         ), $atts, 'band_event_list' );
 
+        $template_output = self::render_template( 'list.php', array( 'atts' => $atts ) );
+        if ( '' !== $template_output ) {
+            return $template_output;
+        }
+
         $today_midnight = date( 'Y-m-d 00:00:00', current_time( 'timestamp' ) );
 
         $events = new WP_Query( array(
@@ -227,11 +263,38 @@ class Band_Event_RSVP_Frontend {
         return $event_timestamp < $current_timestamp;
     }
 
+    public static function can_current_user_rsvp( $post_id = 0 ) {
+        if ( self::get_current_member_status() ) {
+            return true;
+        }
+
+        if ( is_user_logged_in() ) {
+            return true;
+        }
+
+        if ( $post_id > 0 && current_user_can( 'edit_post', $post_id ) ) {
+            return true;
+        }
+
+        return false;
+    }
+
+    public static function is_event_open_for_rsvp( $fields ) {
+        $reference_time = '';
+
+        if ( is_array( $fields ) ) {
+            $reference_time = ! empty( $fields['end'] ) ? $fields['end'] : ( isset( $fields['start'] ) ? $fields['start'] : '' );
+        }
+
+        return ! self::is_event_in_past( $reference_time );
+    }
+
     public static function render_event_summary( $post_id ) {
         $fields = Band_Event_RSVP_CPT::get_event_fields( $post_id );
         $title = get_the_title( $post_id );
         $excerpt = get_the_excerpt( $post_id );
         $start = $fields['start'] ? date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $fields['start'] ) ) : esc_html__( 'No start time set', 'band-event-rsvp' );
+        $end = $fields['end'] ? date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $fields['end'] ) ) : esc_html__( 'No end time set', 'band-event-rsvp' );
         $location = $fields['location'] ? esc_html( $fields['location'] ) : esc_html__( 'No location set', 'band-event-rsvp' );
         $permalink = get_permalink( $post_id );
 
@@ -251,18 +314,80 @@ class Band_Event_RSVP_Frontend {
         $output  = '<div class="band-event-item">';
         $output .= '<a href="' . esc_url( $permalink ) . '" class="band-event-link">';
         $output .= '<span class="band-event-title">' . esc_html( $title ) . '</span>';
-        $output .= '<span class="band-event-meta">' . esc_html( $start ) . ' | ' . $location . '</span>';
+        $output .= '<span class="band-event-meta">' . esc_html__( 'Start:', 'band-event-rsvp' ) . ' ' . esc_html( $start ) . ' | ' . esc_html__( 'End:', 'band-event-rsvp' ) . ' ' . esc_html( $end ) . ' | ' . esc_html__( 'Location:', 'band-event-rsvp' ) . ' ' . $location . '</span>';
         if ( $recurrence_note ) {
             $output .= '<span class="band-event-recurring">' . esc_html( $recurrence_note ) . '</span>';
         }
+        $output .= '<span class="band-event-invited-levels">' . esc_html__( 'Invited levels:', 'band-event-rsvp' ) . ' ' . esc_html( self::get_invited_levels_display( $post_id ) ) . '</span>';
         $output .= '</a>';
         $output .= self::render_add_to_calendar_button( $post_id );
-
-        if ( ! self::is_event_in_past( $fields['start'] ) && self::get_current_member_status() ) {
-            $output .= self::render_event_list_rsvp( $post_id );
-        }
+        $output .= self::render_event_attendance_summary( $post_id );
 
         $output .= '</div>';
+
+        return $output;
+    }
+
+    public static function get_invited_levels_display( $post_id ) {
+        $invited_levels = Band_Event_RSVP_CPT::get_invited_membership_levels( $post_id );
+
+        if ( empty( $invited_levels ) ) {
+            return __( 'All members', 'band-event-rsvp' );
+        }
+
+        $available_levels = Band_Event_RSVP_CPT::get_available_membership_levels();
+        $level_labels = array();
+
+        foreach ( $invited_levels as $level_id ) {
+            if ( isset( $available_levels[ $level_id ] ) ) {
+                $level_labels[] = $available_levels[ $level_id ];
+            } else {
+                $level_labels[] = sprintf( __( 'Level %d', 'band-event-rsvp' ), intval( $level_id ) );
+            }
+        }
+
+        if ( empty( $level_labels ) ) {
+            return __( 'All members', 'band-event-rsvp' );
+        }
+
+        return implode( ', ', $level_labels );
+    }
+
+    public static function get_event_attendance_counts( $post_id ) {
+        $responses = self::get_rsvp_list( $post_id );
+        $counts = array(
+            'yes'        => 0,
+            'maybe'      => 0,
+            'no'         => 0,
+            'unanswered' => 0,
+        );
+
+        foreach ( $responses as $response ) {
+            $status = isset( $response['status'] ) ? $response['status'] : 'no';
+            if ( isset( $counts[ $status ] ) ) {
+                $counts[ $status ]++;
+            }
+        }
+
+        $invited_ids = Band_Event_RSVP_CPT::get_invited_member_user_ids( $post_id );
+        if ( ! empty( $invited_ids ) ) {
+            $responded_ids = array_map( 'intval', array_keys( $responses ) );
+            $pending_ids = array_diff( $invited_ids, $responded_ids );
+            $counts['unanswered'] = count( $pending_ids );
+        }
+
+        return $counts;
+    }
+
+    public static function render_event_attendance_summary( $post_id ) {
+        $counts = self::get_event_attendance_counts( $post_id );
+
+        $output  = '<p class="band-event-attendance-summary">';
+        $output .= '<span class="band-event-attendance-chip band-event-attendance-yes">✅ ' . intval( $counts['yes'] ) . '</span>';
+        $output .= '<span class="band-event-attendance-chip band-event-attendance-maybe">🤔 ' . intval( $counts['maybe'] ) . '</span>';
+        $output .= '<span class="band-event-attendance-chip band-event-attendance-no">❌ ' . intval( $counts['no'] ) . '</span>';
+        $output .= '<span class="band-event-attendance-chip band-event-attendance-unanswered">❔ ' . intval( $counts['unanswered'] ) . '</span>';
+        $output .= '</p>';
 
         return $output;
     }
@@ -270,12 +395,14 @@ class Band_Event_RSVP_Frontend {
     public static function render_event_list_rsvp( $post_id ) {
         $user_id = get_current_user_id();
         $rsvp_data = self::get_rsvp_for_user( $post_id, $user_id );
-        $current_status = $rsvp_data['status'] ?? '';
+        $current_status = isset( $rsvp_data['status'] ) ? $rsvp_data['status'] : '';
+        $current_comment = isset( $rsvp_data['comment'] ) ? $rsvp_data['comment'] : '';
 
         $output = '<div class="band-event-rsvp-inline">';
         $output .= '<form method="post" class="band-event-rsvp-form-inline">';
         $output .= wp_nonce_field( 'band_event_rsvp_form', 'band_event_rsvp_nonce', true, false );
         $output .= '<input type="hidden" name="band_event_id" value="' . esc_attr( $post_id ) . '" />';
+        $output .= '<p><label>' . esc_html__( 'Comment', 'band-event-rsvp' ) . '<br /><textarea name="band_event_comment" class="widefat" rows="3">' . esc_textarea( $current_comment ) . '</textarea></label></p>';
         $output .= '<div class="band-event-rsvp-buttons">';
         $output .= '<button type="submit" name="band_event_response" value="yes" class="band-event-rsvp-button band-event-rsvp-button-yes ' . ( 'yes' === $current_status ? 'active' : '' ) . '">✅ ' . esc_html__( 'Yes', 'band-event-rsvp' ) . '</button>';
         $output .= '<button type="submit" name="band_event_response" value="maybe" class="band-event-rsvp-button band-event-rsvp-button-maybe ' . ( 'maybe' === $current_status ? 'active' : '' ) . '">🤔 ' . esc_html__( 'Maybe', 'band-event-rsvp' ) . '</button>';
@@ -300,6 +427,214 @@ class Band_Event_RSVP_Frontend {
         return self::render_event_detail_content( $post_id );
     }
 
+    public static function render_event_actions( $atts ) {
+        $atts = shortcode_atts(
+            array(
+                'id'            => 0,
+                'show_calendar' => '1',
+                'show_admin'    => '1',
+                'show_rsvp'     => '1',
+            ),
+            $atts,
+            'band_event_actions'
+        );
+
+        $post_id = self::resolve_event_post_id_from_context( $atts['id'] );
+
+        if ( $post_id <= 0 || 'event' !== get_post_type( $post_id ) ) {
+            return '';
+        }
+
+        $fields = Band_Event_RSVP_CPT::get_event_fields( $post_id );
+        $output = '<div class="band-event-actions-shortcode">';
+
+        if ( '0' !== (string) $atts['show_calendar'] ) {
+            $output .= self::render_add_to_calendar_button( $post_id );
+        }
+
+        if ( '0' !== (string) $atts['show_admin'] && current_user_can( 'edit_post', $post_id ) ) {
+            $output .= '<p class="band-event-admin-actions">';
+            $output .= '<a class="band-event-admin-edit" href="' . esc_url( get_edit_post_link( $post_id ) ) . '">' . esc_html__( 'Edit', 'band-event-rsvp' ) . '</a>';
+            if ( current_user_can( 'delete_post', $post_id ) ) {
+                $output .= ' | <a class="band-event-admin-delete" href="' . esc_url( get_delete_post_link( $post_id, '', false ) ) . '">' . esc_html__( 'Move to Trash', 'band-event-rsvp' ) . '</a>';
+            }
+            $output .= '</p>';
+        }
+
+        if ( '0' !== (string) $atts['show_rsvp'] && self::is_event_open_for_rsvp( $fields ) && self::can_current_user_rsvp( $post_id ) ) {
+            $output .= self::render_event_list_rsvp( $post_id );
+        }
+
+        $output .= '</div>';
+
+        return $output;
+    }
+
+    public static function get_shortcode_event_post_id( $atts, $shortcode_tag ) {
+        $atts = shortcode_atts(
+            array(
+                'id' => 0,
+            ),
+            $atts,
+            $shortcode_tag
+        );
+
+        $post_id = self::resolve_event_post_id_from_context( $atts['id'] );
+        if ( $post_id <= 0 || 'event' !== get_post_type( $post_id ) ) {
+            return 0;
+        }
+
+        return $post_id;
+    }
+
+    public static function render_event_start_datetime_shortcode( $atts ) {
+        $post_id = self::get_shortcode_event_post_id( $atts, 'band_event_start_datetime' );
+        if ( ! $post_id ) {
+            return '';
+        }
+
+        $fields = Band_Event_RSVP_CPT::get_event_fields( $post_id );
+        if ( empty( $fields['start'] ) ) {
+            return '';
+        }
+
+        $formatted = date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $fields['start'] ) );
+        return '<span class="band-event-start-datetime">' . esc_html( $formatted ) . '</span>';
+    }
+
+    public static function render_event_end_datetime_shortcode( $atts ) {
+        $post_id = self::get_shortcode_event_post_id( $atts, 'band_event_end_datetime' );
+        if ( ! $post_id ) {
+            return '';
+        }
+
+        $fields = Band_Event_RSVP_CPT::get_event_fields( $post_id );
+        if ( empty( $fields['end'] ) ) {
+            return '';
+        }
+
+        $formatted = date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $fields['end'] ) );
+        return '<span class="band-event-end-datetime">' . esc_html( $formatted ) . '</span>';
+    }
+
+    public static function render_event_member_levels_shortcode( $atts ) {
+        $post_id = self::get_shortcode_event_post_id( $atts, 'band_event_member_levels' );
+        if ( ! $post_id ) {
+            return '';
+        }
+
+        $levels = self::get_invited_levels_display( $post_id );
+        return '<span class="band-event-shortcode-member-levels">' . esc_html( $levels ) . '</span>';
+    }
+
+    public static function render_event_calendar_button_shortcode( $atts ) {
+        $post_id = self::get_shortcode_event_post_id( $atts, 'band_event_calendar_button' );
+        if ( ! $post_id ) {
+            return '';
+        }
+
+        return self::render_add_to_calendar_button( $post_id );
+    }
+
+    public static function render_event_admin_tools_shortcode( $atts ) {
+        $post_id = self::get_shortcode_event_post_id( $atts, 'band_event_admin_tools' );
+        if ( ! $post_id || ! current_user_can( 'edit_post', $post_id ) ) {
+            return '';
+        }
+
+        $output = '<p class="band-event-admin-actions">';
+        $output .= '<a class="band-event-admin-edit" href="' . esc_url( get_edit_post_link( $post_id ) ) . '">' . esc_html__( 'Edit', 'band-event-rsvp' ) . '</a>';
+        if ( current_user_can( 'delete_post', $post_id ) ) {
+            $output .= ' | <a class="band-event-admin-delete" href="' . esc_url( get_delete_post_link( $post_id, '', false ) ) . '">' . esc_html__( 'Move to Trash', 'band-event-rsvp' ) . '</a>';
+        }
+        $output .= '</p>';
+
+        return $output;
+    }
+
+    public static function render_event_contact_name_shortcode( $atts ) {
+        $post_id = self::get_shortcode_event_post_id( $atts, 'band_event_contact_name' );
+        if ( ! $post_id ) {
+            return '';
+        }
+
+        $fields = Band_Event_RSVP_CPT::get_event_fields( $post_id );
+        if ( empty( $fields['contact_person'] ) ) {
+            return '';
+        }
+
+        return '<span class="band-event-contact-name">' . esc_html( $fields['contact_person'] ) . '</span>';
+    }
+
+    public static function render_event_rsvp_buttons_shortcode( $atts ) {
+        $post_id = self::get_shortcode_event_post_id( $atts, 'band_event_rsvp_buttons' );
+        if ( ! $post_id ) {
+            return '';
+        }
+
+        return self::render_rsvp_section( $post_id );
+    }
+
+    public static function render_event_attendee_dropdowns_shortcode( $atts ) {
+        $post_id = self::get_shortcode_event_post_id( $atts, 'band_event_attendee_dropdowns' );
+        if ( ! $post_id ) {
+            return '';
+        }
+
+        return self::render_attendee_list( $post_id );
+    }
+
+    public static function resolve_event_post_id_from_context( $raw_id = 0 ) {
+        $explicit_id = absint( $raw_id );
+        if ( $explicit_id > 0 ) {
+            return $explicit_id;
+        }
+
+        $candidates = array();
+
+        $the_id = get_the_ID();
+        if ( $the_id ) {
+            $candidates[] = absint( $the_id );
+        }
+
+        $current_post = get_post();
+        if ( $current_post instanceof WP_Post ) {
+            $candidates[] = absint( $current_post->ID );
+        }
+
+        global $post;
+        if ( $post instanceof WP_Post ) {
+            $candidates[] = absint( $post->ID );
+        }
+
+        global $wp_query;
+        if ( isset( $wp_query->post ) && $wp_query->post instanceof WP_Post ) {
+            $candidates[] = absint( $wp_query->post->ID );
+        }
+
+        $queried_object_id = get_queried_object_id();
+        if ( $queried_object_id ) {
+            $candidates[] = absint( $queried_object_id );
+        }
+
+        $request_post_id = 0;
+        if ( isset( $_REQUEST['post_id'] ) && is_scalar( $_REQUEST['post_id'] ) ) {
+            $request_post_id = absint( wp_unslash( (string) $_REQUEST['post_id'] ) );
+        }
+        if ( $request_post_id > 0 ) {
+            $candidates[] = $request_post_id;
+        }
+
+        $candidates = array_values( array_unique( array_filter( $candidates ) ) );
+        foreach ( $candidates as $candidate_id ) {
+            if ( 'event' === get_post_type( $candidate_id ) ) {
+                return $candidate_id;
+            }
+        }
+
+        return 0;
+    }
+
     public static function render_event_detail_content( $post_id ) {
         $post = get_post( $post_id );
         if ( ! $post || 'event' !== $post->post_type ) {
@@ -322,22 +657,9 @@ class Band_Event_RSVP_Frontend {
             $output .= '<li><strong>' . esc_html__( 'Recurring:', 'band-event-rsvp' ) . '</strong> ' . esc_html( sprintf( __( 'Every %d %s', 'band-event-rsvp' ), intval( $fields['recurring_count'] ), $fields['recurring_unit'] ) ) . '</li>';
         }
         $output .= '<li><strong>' . esc_html__( 'Contact:', 'band-event-rsvp' ) . '</strong> ' . esc_html( $fields['contact_person'] ) . '</li>';
-        $invited_levels = Band_Event_RSVP_CPT::get_invited_membership_levels( $post_id );
-        if ( ! empty( $invited_levels ) ) {
-            $available_levels = Band_Event_RSVP_CPT::get_available_membership_levels();
-            $level_labels = array();
-            foreach ( $invited_levels as $level_id ) {
-                if ( isset( $available_levels[ $level_id ] ) ) {
-                    $level_labels[] = $available_levels[ $level_id ];
-                } else {
-                    $level_labels[] = sprintf( esc_html__( 'Level %d', 'band-event-rsvp' ), intval( $level_id ) );
-                }
-            }
-            if ( ! empty( $level_labels ) ) {
-                $output .= '<li><strong>' . esc_html__( 'Invited levels:', 'band-event-rsvp' ) . '</strong> ' . esc_html( implode( ', ', $level_labels ) ) . '</li>';
-            }
-        }
+        $output .= '<li><strong>' . esc_html__( 'Invited levels:', 'band-event-rsvp' ) . '</strong> ' . esc_html( self::get_invited_levels_display( $post_id ) ) . '</li>';
         $output .= '</ul>';
+        $output .= self::render_location_map_if_enabled( $fields );
         $output .= self::render_add_to_calendar_button( $post_id );
         $output .= self::render_rsvp_section( $post_id );
         $output .= self::render_attendee_list( $post_id );
@@ -346,26 +668,49 @@ class Band_Event_RSVP_Frontend {
         return $output;
     }
 
+    public static function render_location_map_if_enabled( $fields ) {
+        $show_map = get_option( 'band_event_show_location_map', false );
+        if ( ! $show_map || ! is_array( $fields ) || empty( $fields['location'] ) ) {
+            return '';
+        }
+
+        $location = trim( (string) $fields['location'] );
+        if ( '' === $location ) {
+            return '';
+        }
+
+        $query = rawurlencode( $location );
+        $map_url = 'https://maps.google.com/maps?q=' . $query . '&output=embed';
+
+        $output  = '<div class="band-event-location-map">';
+        $output .= '<h3>' . esc_html__( 'Map', 'band-event-rsvp' ) . '</h3>';
+        $output .= '<iframe src="' . esc_url( $map_url ) . '" width="100%" height="300" style="border:0;" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>';
+        $output .= '</div>';
+
+        return $output;
+    }
+
     public static function render_rsvp_section( $post_id ) {
-        if ( ! self::get_current_member_status() ) {
-            return '<p class="band-event-login-message">' . esc_html__( 'Please log in as a member to RSVP.', 'band-event-rsvp' ) . '</p>';
+        if ( ! self::can_current_user_rsvp( $post_id ) ) {
+            return '<p class="band-event-login-message">' . esc_html__( 'Please log in to RSVP.', 'band-event-rsvp' ) . '</p>';
         }
 
         $fields = Band_Event_RSVP_CPT::get_event_fields( $post_id );
-        if ( self::is_event_in_past( $fields['start'] ) ) {
+        if ( ! self::is_event_open_for_rsvp( $fields ) ) {
             return '<p class="band-event-past-message">' . esc_html__( 'This event has already occurred and RSVPs are no longer accepted.', 'band-event-rsvp' ) . '</p>';
         }
 
         $user_id = get_current_user_id();
         $rsvp_data = self::get_rsvp_for_user( $post_id, $user_id );
-        $current_status = $rsvp_data['status'] ?? '';
+        $current_status = isset( $rsvp_data['status'] ) ? $rsvp_data['status'] : '';
+        $current_comment = isset( $rsvp_data['comment'] ) ? $rsvp_data['comment'] : '';
 
         $output  = '<div class="band-event-rsvp">';
         $output .= '<h3>' . esc_html__( 'RSVP', 'band-event-rsvp' ) . '</h3>';
         $output .= '<form method="post" class="band-event-rsvp-form">';
         $output .= wp_nonce_field( 'band_event_rsvp_form', 'band_event_rsvp_nonce', true, false );
         $output .= '<input type="hidden" name="band_event_id" value="' . esc_attr( $post_id ) . '" />';
-        $output .= '<p><label>' . esc_html__( 'Comment', 'band-event-rsvp' ) . '<br /><textarea name="band_event_comment" class="widefat" rows="4">' . esc_textarea( $rsvp_data['comment'] ?? '' ) . '</textarea></label></p>';
+        $output .= '<p><label>' . esc_html__( 'Comment', 'band-event-rsvp' ) . '<br /><textarea name="band_event_comment" class="widefat" rows="4">' . esc_textarea( $current_comment ) . '</textarea></label></p>';
         $output .= '<div class="band-event-rsvp-buttons-large">';
         $output .= '<button type="submit" name="band_event_response" value="yes" class="band-event-rsvp-button band-event-rsvp-button-yes ' . ( 'yes' === $current_status ? 'active' : '' ) . '">✅ ' . esc_html__( 'Yes', 'band-event-rsvp' ) . '</button>';
         $output .= '<button type="submit" name="band_event_response" value="maybe" class="band-event-rsvp-button band-event-rsvp-button-maybe ' . ( 'maybe' === $current_status ? 'active' : '' ) . '">🤔 ' . esc_html__( 'Maybe', 'band-event-rsvp' ) . '</button>';
@@ -417,51 +762,42 @@ class Band_Event_RSVP_Frontend {
         }
 
         if ( ! empty( $grouped['yes'] ) ) {
-            $output .= '<div class="band-event-attendees-group band-event-attendees-yes">';
-            $output .= '<h4>' . esc_html__( 'Attending', 'band-event-rsvp' ) . ' (' . count( $grouped['yes'] ) . ')</h4>';
-            $output .= '<ul>';
-            foreach ( $grouped['yes'] as $response ) {
-                $output .= '<li>' . esc_html( $response['display_name'] );
-                if ( ! empty( $response['comment'] ) ) {
-                    $output .= ' - ' . esc_html( $response['comment'] );
-                }
-                $output .= '</li>';
-            }
-            $output .= '</ul>';
-            $output .= '</div>';
+            $output .= self::render_attendee_group_accordion( 'yes', __( 'Attending', 'band-event-rsvp' ), $grouped['yes'], true );
         }
 
         if ( ! empty( $grouped['maybe'] ) ) {
-            $output .= '<div class="band-event-attendees-group band-event-attendees-maybe">';
-            $output .= '<h4>' . esc_html__( 'Maybe', 'band-event-rsvp' ) . ' (' . count( $grouped['maybe'] ) . ')</h4>';
-            $output .= '<ul>';
-            foreach ( $grouped['maybe'] as $response ) {
-                $output .= '<li>' . esc_html( $response['display_name'] );
-                if ( ! empty( $response['comment'] ) ) {
-                    $output .= ' - ' . esc_html( $response['comment'] );
-                }
-                $output .= '</li>';
-            }
-            $output .= '</ul>';
-            $output .= '</div>';
+            $output .= self::render_attendee_group_accordion( 'maybe', __( 'Maybe', 'band-event-rsvp' ), $grouped['maybe'] );
         }
 
         if ( ! empty( $grouped['no'] ) ) {
-            $output .= '<div class="band-event-attendees-group band-event-attendees-no">';
-            $output .= '<h4>' . esc_html__( 'Not Attending', 'band-event-rsvp' ) . ' (' . count( $grouped['no'] ) . ')</h4>';
-            $output .= '<ul>';
-            foreach ( $grouped['no'] as $response ) {
-                $output .= '<li>' . esc_html( $response['display_name'] );
-                if ( ! empty( $response['comment'] ) ) {
-                    $output .= ' - ' . esc_html( $response['comment'] );
-                }
-                $output .= '</li>';
-            }
-            $output .= '</ul>';
-            $output .= '</div>';
+            $output .= self::render_attendee_group_accordion( 'no', __( 'Not Attending', 'band-event-rsvp' ), $grouped['no'] );
         }
 
         $output .= self::render_unanswered_attendee_list( $post_id );
+        $output .= '</div>';
+
+        return $output;
+    }
+
+    public static function render_attendee_group_accordion( $status, $label, $items, $open = false ) {
+        $output  = '<div class="band-event-attendees-group band-event-attendees-' . esc_attr( $status ) . '">';
+        $output .= '<details class="band-event-attendees-accordion"' . ( $open ? ' open' : '' ) . '>';
+        $output .= '<summary><span class="band-event-attendees-title">' . esc_html( $label ) . '</span> <span class="band-event-attendee-count">(' . count( $items ) . ')</span></summary>';
+        $output .= '<ul>';
+
+        foreach ( $items as $item ) {
+            $display_name = isset( $item['display_name'] ) ? $item['display_name'] : '';
+            $comment = isset( $item['comment'] ) ? $item['comment'] : '';
+
+            $output .= '<li>' . esc_html( $display_name );
+            if ( ! empty( $comment ) ) {
+                $output .= ' - ' . esc_html( $comment );
+            }
+            $output .= '</li>';
+        }
+
+        $output .= '</ul>';
+        $output .= '</details>';
         $output .= '</div>';
 
         return $output;
@@ -482,7 +818,8 @@ class Band_Event_RSVP_Frontend {
         }
 
         $output  = '<div class="band-event-attendees-group band-event-attendees-unanswered">';
-        $output .= '<h4>' . esc_html__( 'Not Yet Responded', 'band-event-rsvp' ) . ' (' . count( $pending_ids ) . ')</h4>';
+        $output .= '<details class="band-event-attendees-accordion">';
+        $output .= '<summary><span class="band-event-attendees-title">' . esc_html__( 'Not Yet Responded', 'band-event-rsvp' ) . '</span> <span class="band-event-attendee-count">(' . count( $pending_ids ) . ')</span></summary>';
         $output .= '<ul>';
         foreach ( $pending_ids as $user_id ) {
             $user = get_userdata( $user_id );
@@ -499,6 +836,7 @@ class Band_Event_RSVP_Frontend {
             $output .= '<li>' . esc_html( $label ) . '</li>';
         }
         $output .= '</ul>';
+        $output .= '</details>';
         $output .= '</div>';
 
         return $output;
@@ -513,10 +851,6 @@ class Band_Event_RSVP_Frontend {
             wp_die( 'Security check failed.' );
         }
 
-        if ( ! self::get_current_member_status() ) {
-            wp_die( 'You must be logged in to RSVP.' );
-        }
-
         $post_id = isset( $_POST['band_event_id'] ) ? intval( $_POST['band_event_id'] ) : 0;
         $status  = sanitize_text_field( wp_unslash( $_POST['band_event_response'] ) );
         $comment = isset( $_POST['band_event_comment'] ) ? sanitize_textarea_field( wp_unslash( $_POST['band_event_comment'] ) ) : '';
@@ -527,12 +861,16 @@ class Band_Event_RSVP_Frontend {
             wp_die( 'Invalid event ID.' );
         }
 
+        if ( ! self::can_current_user_rsvp( $post_id ) ) {
+            wp_die( 'You must be logged in to RSVP.' );
+        }
+
         if ( ! in_array( $status, array( 'yes', 'maybe', 'no' ), true ) ) {
             wp_die( 'Invalid RSVP status.' );
         }
 
         $fields = Band_Event_RSVP_CPT::get_event_fields( $post_id );
-        if ( self::is_event_in_past( $fields['start'] ) ) {
+        if ( ! self::is_event_open_for_rsvp( $fields ) ) {
             wp_die( 'Cannot RSVP to past events.' );
         }
 

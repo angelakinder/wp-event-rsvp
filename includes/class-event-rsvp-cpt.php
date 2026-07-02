@@ -73,6 +73,19 @@ class Band_Event_RSVP_CPT {
         $recurring_count = $recurring_count ? intval( $recurring_count ) : 0;
         $recurring_unit  = $recurring_unit ? $recurring_unit : 'none';
         $recurrence_occurrences = $recurrence_occurrences ? intval( $recurrence_occurrences ) : 0;
+        $recurrence_occurrences = min( 104, max( 0, $recurrence_occurrences ) );
+
+        if ( empty( $contact ) && is_user_logged_in() ) {
+            $current_user = wp_get_current_user();
+            if ( $current_user instanceof WP_User ) {
+                $default_contact = trim( (string) $current_user->first_name . ' ' . (string) $current_user->last_name );
+                if ( empty( $default_contact ) ) {
+                    $default_contact = (string) $current_user->user_login;
+                }
+                $contact = sanitize_text_field( $default_contact );
+            }
+        }
+
         $contact_options = self::get_contact_person_options();
         ?>
         <p>
@@ -102,8 +115,9 @@ class Band_Event_RSVP_CPT {
                 $end_time = $end_dt->format( 'H:i' );
             }
         } else {
-            $end_date = current_time( 'Y-m-d' );
-            $end_time = current_time( 'H:i' );
+            $default_end_ts = current_time( 'timestamp' ) + HOUR_IN_SECONDS;
+            $end_date = wp_date( 'Y-m-d', $default_end_ts );
+            $end_time = wp_date( 'H:i', $default_end_ts );
         }
         ?>
         <p>
@@ -134,7 +148,7 @@ class Band_Event_RSVP_CPT {
         </p>
         <p>
             <label for="band_event_recurrence_occurrences"><?php esc_html_e( 'Number of occurrences', 'band-event-rsvp' ); ?></label><br />
-            <input type="number" id="band_event_recurrence_occurrences" name="band_event_recurrence_occurrences" value="<?php echo esc_attr( $recurrence_occurrences ); ?>" min="0" class="small-text" />
+            <input type="number" id="band_event_recurrence_occurrences" name="band_event_recurrence_occurrences" value="<?php echo esc_attr( $recurrence_occurrences ); ?>" min="0" max="104" class="small-text" />
         </p>
         <p>
             <label for="band_event_recurrence_end_date"><?php esc_html_e( 'Or end date', 'band-event-rsvp' ); ?></label><br />
@@ -166,10 +180,10 @@ class Band_Event_RSVP_CPT {
                 <label for="band_event_invited_levels"><?php esc_html_e( 'Invite membership levels', 'band-event-rsvp' ); ?></label><br />
                 <select id="band_event_invited_levels" name="band_event_invited_levels[]" class="widefat" multiple size="4">
                     <?php foreach ( $available_levels as $level_id => $level_label ) : ?>
-                        <option value="<?php echo esc_attr( $level_id ); ?>" <?php selected( in_array( $level_id, $invited_levels, true ) ); ?>><?php echo esc_html( $level_label ); ?></option>
+                        <option value="<?php echo esc_attr( $level_id ); ?>" <?php selected( in_array( absint( $level_id ), $invited_levels, true ) ); ?>><?php echo esc_html( $level_label ); ?></option>
                     <?php endforeach; ?>
                 </select>
-                <span class="description"><?php esc_html_e( 'Select the Simple Membership levels invited to this event. Leave blank to invite all members.', 'band-event-rsvp' ); ?></span>
+                <span class="description"><?php esc_html_e( 'Select the Simple Membership levels invited to this event (press Shift for multiples). Leave blank to invite all members.', 'band-event-rsvp' ); ?></span>
             </p>
         <?php elseif ( class_exists( 'SwpmMembershipLevelUtils' ) ) : ?>
             <p class="description"><?php esc_html_e( 'Create Simple Membership levels first to invite members to this event.', 'band-event-rsvp' ); ?></p>
@@ -274,7 +288,8 @@ class Band_Event_RSVP_CPT {
             return;
         }
 
-        if ( ! isset( $_POST['band_event_details_nonce'] ) || ! wp_verify_nonce( $_POST['band_event_details_nonce'], 'save_band_event_details' ) ) {
+        $nonce = isset( $_POST['band_event_details_nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_details_nonce'] ) ) : '';
+        if ( '' === $nonce || ! wp_verify_nonce( $nonce, 'save_band_event_details' ) ) {
             return;
         }
 
@@ -306,19 +321,53 @@ class Band_Event_RSVP_CPT {
             $end = sanitize_text_field( wp_unslash( $_POST['band_event_end'] ) );
         }
 
+        if ( empty( $start ) ) {
+            $start = current_time( 'Y-m-d H:i' );
+        }
+
+        if ( empty( $end ) ) {
+            $end_ts = strtotime( $start );
+            if ( false !== $end_ts ) {
+                $end = wp_date( 'Y-m-d H:i', $end_ts + HOUR_IN_SECONDS );
+            }
+        }
+
         if ( ! empty( $start ) && ! empty( $end ) ) {
             $start_ts = strtotime( $start );
             $end_ts = strtotime( $end );
+
+            if ( false === $start_ts ) {
+                $start = current_time( 'Y-m-d H:i' );
+                $start_ts = strtotime( $start );
+            }
+
+            if ( false === $end_ts && false !== $start_ts ) {
+                $end = wp_date( 'Y-m-d H:i', $start_ts + HOUR_IN_SECONDS );
+                $end_ts = strtotime( $end );
+            }
+
             if ( false !== $start_ts && false !== $end_ts && $end_ts <= $start_ts ) {
-                return;
+                $end = wp_date( 'Y-m-d H:i', $start_ts + HOUR_IN_SECONDS );
             }
         }
 
         $recurring_count = isset( $_POST['band_event_recurring_count'] ) ? intval( $_POST['band_event_recurring_count'] ) : 0;
         $recurring_unit  = isset( $_POST['band_event_recurring_unit'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurring_unit'] ) ) : 'none';
         $recurrence_occurrences = isset( $_POST['band_event_recurrence_occurrences'] ) ? intval( $_POST['band_event_recurrence_occurrences'] ) : 0;
+        $recurrence_occurrences = min( 104, max( 0, $recurrence_occurrences ) );
         $recurrence_end_date = isset( $_POST['band_event_recurrence_end_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurrence_end_date'] ) ) : '';
         $contact   = isset( $_POST['band_event_contact_person'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_contact_person'] ) ) : '';
+
+        if ( empty( $contact ) && is_user_logged_in() ) {
+            $current_user = wp_get_current_user();
+            if ( $current_user instanceof WP_User ) {
+                $default_contact = trim( (string) $current_user->first_name . ' ' . (string) $current_user->last_name );
+                if ( empty( $default_contact ) ) {
+                    $default_contact = (string) $current_user->user_login;
+                }
+                $contact = sanitize_text_field( $default_contact );
+            }
+        }
 
         update_post_meta( $post_id, '_band_event_location', $location );
         update_post_meta( $post_id, '_band_event_start', $start );
@@ -366,7 +415,13 @@ class Band_Event_RSVP_CPT {
             }
         }
 
-        $invited_levels = isset( $_POST['band_event_invited_levels'] ) && is_array( $_POST['band_event_invited_levels'] ) ? array_map( 'absint', $_POST['band_event_invited_levels'] ) : array();
+        $invited_levels = array();
+        if ( isset( $_POST['band_event_invited_levels'] ) ) {
+            $raw_levels = wp_unslash( $_POST['band_event_invited_levels'] );
+            if ( is_array( $raw_levels ) ) {
+                $invited_levels = array_values( array_unique( array_filter( array_map( 'absint', $raw_levels ) ) ) );
+            }
+        }
         if ( ! empty( $invited_levels ) ) {
             update_post_meta( $post_id, '_band_event_invited_levels', $invited_levels );
         } else {
@@ -393,11 +448,11 @@ class Band_Event_RSVP_CPT {
         switch ( $column ) {
             case 'event_date':
                 $start = get_post_meta( $post_id, '_band_event_start', true );
-                echo esc_html( $start ? date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $start ) ) : '—' );
+                echo esc_html( $start ? date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $start ) ) : '-' );
                 break;
             case 'event_location':
                 $location = get_post_meta( $post_id, '_band_event_location', true );
-                echo esc_html( $location ? $location : '—' );
+                echo esc_html( $location ? $location : '-' );
                 break;
             case 'event_recurrence':
                 $series_id = get_post_meta( $post_id, '_band_event_recurrence_id', true );
@@ -417,7 +472,7 @@ class Band_Event_RSVP_CPT {
                 } elseif ( $count > 0 && $unit && 'none' !== $unit ) {
                     echo esc_html( sprintf( __( 'Repeats every %d %s', 'band-event-rsvp' ), intval( $count ), $unit ) );
                 } else {
-                    echo '—';
+                    echo '-';
                 }
                 break;
         }

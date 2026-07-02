@@ -28,23 +28,6 @@ function band_event_rsvp_init_plugin() {
 }
 add_action( 'plugins_loaded', 'band_event_rsvp_init_plugin' );
 
-function band_event_rsvp_template_loader( $template ) {
-    if ( is_post_type_archive( 'event' ) ) {
-        $theme_template = locate_template( array( 'band-event-rsvp/archive-event.php', 'archive-event.php' ) );
-        if ( ! empty( $theme_template ) ) {
-            return $theme_template;
-        }
-
-        $plugin_template = BAND_EVENT_RSVP_DIR . 'templates/archive-event.php';
-        if ( file_exists( $plugin_template ) ) {
-            return $plugin_template;
-        }
-    }
-
-    return $template;
-}
-add_filter( 'template_include', 'band_event_rsvp_template_loader' );
-
 function band_event_rsvp_activate() {
     Band_Event_RSVP_CPT::register_event_post_type();
     flush_rewrite_rules();
