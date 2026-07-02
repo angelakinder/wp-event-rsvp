@@ -341,8 +341,6 @@ class Band_Event_RSVP_Frontend {
                 $name = trim( (string) $user->first_name . ' ' . (string) $user->last_name );
                 if ( ! empty( $name ) ) {
                     $label = $name;
-                } elseif ( ! empty( $user->display_name ) ) {
-                    $label = $user->display_name;
                 } else {
                     $label = $user->user_login;
                 }
@@ -392,11 +390,7 @@ class Band_Event_RSVP_Frontend {
         $responses = self::get_rsvp_list( $post_id );
         $full_name = trim( (string) $user->first_name . ' ' . (string) $user->last_name );
         if ( empty( $full_name ) ) {
-            if ( ! empty( $user->display_name ) ) {
-                $full_name = $user->display_name;
-            } else {
-                $full_name = $user->user_login;
-            }
+            $full_name = $user->user_login;
         }
 
         $responses[ $user_id ] = array(

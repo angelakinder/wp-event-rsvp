@@ -63,8 +63,8 @@ class Band_Event_RSVP_Admin {
     public static function add_admin_menu() {
         add_submenu_page(
             'edit.php?post_type=event',
-            __( 'RSVP Settings', 'band-event-rsvp' ),
-            __( 'Settings', 'band-event-rsvp' ),
+            __( 'Simple RSVP Settings', 'band-event-rsvp' ),
+            __( 'Simple RSVP', 'band-event-rsvp' ),
             'manage_options',
             'band-event-rsvp-settings',
             array( __CLASS__, 'render_settings_page' )
@@ -80,7 +80,7 @@ class Band_Event_RSVP_Admin {
         }
         ?>
         <div class="wrap">
-            <h1><?php esc_html_e( 'Band Event RSVP Settings', 'band-event-rsvp' ); ?></h1>
+            <h1><?php esc_html_e( 'Simple RSVP Settings', 'band-event-rsvp' ); ?></h1>
 
             <form method="post" action="options.php" class="band-event-settings-form">
                 <?php
@@ -193,6 +193,16 @@ class Band_Event_RSVP_Admin {
 
         $now_date = current_time( 'Y-m-d' );
         $now_time = current_time( 'H:i' );
+        $start_date_value = isset( $_POST['band_event_start_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_start_date'] ) ) : $now_date;
+        $start_time_value = isset( $_POST['band_event_start_time'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_start_time'] ) ) : $now_time;
+        $end_date_value = isset( $_POST['band_event_end_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_end_date'] ) ) : $now_date;
+        $end_time_value = isset( $_POST['band_event_end_time'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_end_time'] ) ) : $now_time;
+        $recurring_count_value = isset( $_POST['band_event_recurring_count'] ) ? intval( wp_unslash( $_POST['band_event_recurring_count'] ) ) : 0;
+        $recurring_unit_value = isset( $_POST['band_event_recurring_unit'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurring_unit'] ) ) : 'none';
+        $recurrence_occurrences_value = isset( $_POST['band_event_recurrence_occurrences'] ) ? intval( wp_unslash( $_POST['band_event_recurrence_occurrences'] ) ) : 0;
+        $recurrence_end_date_value = isset( $_POST['band_event_recurrence_end_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurrence_end_date'] ) ) : '';
+        $contact_value = isset( $_POST['band_event_contact_person'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_contact_person'] ) ) : '';
+        $contact_options = class_exists( 'Band_Event_RSVP_CPT' ) ? Band_Event_RSVP_CPT::get_contact_person_options() : array();
 
         $output = '';
         $output .= '<form method="post" class="band-event-form">';
@@ -201,17 +211,30 @@ class Band_Event_RSVP_Admin {
         $output .= '<p><label>' . esc_html__( 'Description', 'band-event-rsvp' ) . '<br /><textarea name="band_event_description" class="widefat" rows="5"></textarea></label></p>';
         $output .= '<p><label>' . esc_html__( 'Location', 'band-event-rsvp' ) . '<br /><input type="text" name="band_event_location" class="widefat"></label></p>';
         $output .= '<div class="date-time-row">';
-        $output .= '<div class="date-time-field"><label>' . esc_html__( 'Start Date', 'band-event-rsvp' ) . '<br /><input type="date" name="band_event_start_date" class="widefat" value="' . esc_attr( $now_date ) . '"></label></div>';
-        $output .= '<div class="date-time-field"><label>' . esc_html__( 'Start Time', 'band-event-rsvp' ) . '<br /><input type="time" name="band_event_start_time" class="widefat" value="' . esc_attr( $now_time ) . '"></label></div>';
+        $output .= '<div class="date-time-field"><label>' . esc_html__( 'Start Date', 'band-event-rsvp' ) . '<br /><input type="date" name="band_event_start_date" class="widefat" value="' . esc_attr( $start_date_value ) . '"></label></div>';
+        $output .= '<div class="date-time-field"><label>' . esc_html__( 'Start Time', 'band-event-rsvp' ) . '<br /><input type="time" name="band_event_start_time" class="widefat" value="' . esc_attr( $start_time_value ) . '"></label></div>';
         $output .= '</div>';
         $output .= '<div class="date-time-row">';
-        $output .= '<div class="date-time-field"><label>' . esc_html__( 'End Date', 'band-event-rsvp' ) . '<br /><input type="date" name="band_event_end_date" class="widefat" value="' . esc_attr( $now_date ) . '"></label></div>';
-        $output .= '<div class="date-time-field"><label>' . esc_html__( 'End Time', 'band-event-rsvp' ) . '<br /><input type="time" name="band_event_end_time" class="widefat" value="' . esc_attr( $now_time ) . '"></label></div>';
+        $output .= '<div class="date-time-field"><label>' . esc_html__( 'End Date', 'band-event-rsvp' ) . '<br /><input type="date" name="band_event_end_date" class="widefat" value="' . esc_attr( $end_date_value ) . '"></label></div>';
+        $output .= '<div class="date-time-field"><label>' . esc_html__( 'End Time', 'band-event-rsvp' ) . '<br /><input type="time" name="band_event_end_time" class="widefat" value="' . esc_attr( $end_time_value ) . '"></label></div>';
         $output .= '</div>';
-        $output .= '<p><label>' . esc_html__( 'Recurring every', 'band-event-rsvp' ) . '<br /><input type="number" name="band_event_recurring_count" min="0" class="small-text" value="0"> <select name="band_event_recurring_unit"><option value="none">' . esc_html__( 'None', 'band-event-rsvp' ) . '</option><option value="days">' . esc_html__( 'Days', 'band-event-rsvp' ) . '</option><option value="weeks">' . esc_html__( 'Weeks', 'band-event-rsvp' ) . '</option><option value="months">' . esc_html__( 'Months', 'band-event-rsvp' ) . '</option></select></label></p>';
-        $output .= '<p><label>' . esc_html__( 'Number of occurrences', 'band-event-rsvp' ) . '<br /><input type="number" name="band_event_recurrence_occurrences" min="2" class="small-text" value="0"></label></p>';
-        $output .= '<p><label>' . esc_html__( 'Or end date', 'band-event-rsvp' ) . '<br /><input type="date" name="band_event_recurrence_end_date" class="widefat" /></label></p>';
-        $output .= '<p><label>' . esc_html__( 'Contact Person', 'band-event-rsvp' ) . '<br /><input type="text" name="band_event_contact_person" class="widefat"></label></p>';
+        $output .= '<p><label>' . esc_html__( 'Recurring every', 'band-event-rsvp' ) . '<br /><input type="number" name="band_event_recurring_count" min="0" class="small-text" value="' . esc_attr( $recurring_count_value ) . '"> <select name="band_event_recurring_unit"><option value="none"' . selected( $recurring_unit_value, 'none', false ) . '>' . esc_html__( 'None', 'band-event-rsvp' ) . '</option><option value="days"' . selected( $recurring_unit_value, 'days', false ) . '>' . esc_html__( 'Days', 'band-event-rsvp' ) . '</option><option value="weeks"' . selected( $recurring_unit_value, 'weeks', false ) . '>' . esc_html__( 'Weeks', 'band-event-rsvp' ) . '</option><option value="months"' . selected( $recurring_unit_value, 'months', false ) . '>' . esc_html__( 'Months', 'band-event-rsvp' ) . '</option></select></label></p>';
+        $output .= '<p><label>' . esc_html__( 'Number of occurrences', 'band-event-rsvp' ) . '<br /><input type="number" name="band_event_recurrence_occurrences" min="2" class="small-text" value="' . esc_attr( $recurrence_occurrences_value ) . '"></label></p>';
+        $output .= '<p><label>' . esc_html__( 'Or end date', 'band-event-rsvp' ) . '<br /><input type="date" name="band_event_recurrence_end_date" class="widefat" value="' . esc_attr( $recurrence_end_date_value ) . '" /></label></p>';
+        if ( ! empty( $contact_options ) ) {
+            $output .= '<p><label>' . esc_html__( 'Contact Person', 'band-event-rsvp' ) . '<br />';
+            $output .= '<select name="band_event_contact_person" class="widefat">';
+            $output .= '<option value="">' . esc_html__( 'Select a member', 'band-event-rsvp' ) . '</option>';
+            if ( ! empty( $contact_value ) && ! isset( $contact_options[ $contact_value ] ) ) {
+                $output .= '<option value="' . esc_attr( $contact_value ) . '" selected="selected">' . esc_html( $contact_value ) . '</option>';
+            }
+            foreach ( $contact_options as $option_value => $option_label ) {
+                $output .= '<option value="' . esc_attr( $option_value ) . '"' . selected( $contact_value, $option_value, false ) . '>' . esc_html( $option_label ) . '</option>';
+            }
+            $output .= '</select></label></p>';
+        } else {
+            $output .= '<p><label>' . esc_html__( 'Contact Person', 'band-event-rsvp' ) . '<br /><input type="text" name="band_event_contact_person" class="widefat" value="' . esc_attr( $contact_value ) . '"></label></p>';
+        }
         $output .= '<p><button type="submit" name="band_event_submit" class="button button-primary">' . esc_html__( 'Create Event', 'band-event-rsvp' ) . '</button></p>';
         $output .= '</form>';
 
@@ -344,6 +367,8 @@ class Band_Event_RSVP_Admin {
             return 1;
         }
 
+        $max_generated_posts = 50;
+
         try {
             $current_start = new DateTime( $start );
         } catch ( Exception $e ) {
@@ -384,6 +409,10 @@ class Band_Event_RSVP_Admin {
                 $next_end = ( clone $next_end )->add( $interval );
             }
 
+            if ( ( $series_total - 1 ) >= $max_generated_posts ) {
+                break;
+            }
+
             if ( $occurrences > 1 && $index > $occurrences ) {
                 break;
             }
@@ -397,6 +426,9 @@ class Band_Event_RSVP_Admin {
                 'post_content' => $content,
                 'post_status'  => 'publish',
                 'post_type'    => 'event',
+                'meta_input'   => array(
+                    '_band_event_skip_recurrence_generation' => 1,
+                ),
             ) );
 
             if ( is_wp_error( $next_post_id ) ) {
@@ -414,6 +446,8 @@ class Band_Event_RSVP_Admin {
             if ( ! empty( $end_date ) ) {
                 update_post_meta( $next_post_id, '_band_event_recurrence_end_date', $end_date );
             }
+
+            delete_post_meta( $next_post_id, '_band_event_skip_recurrence_generation' );
 
             $series_total++;
             $index++;

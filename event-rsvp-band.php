@@ -1,7 +1,7 @@
 <?php
 /**
- * Plugin Name: Band Event RSVP
- * Description: Simple RSVP events plugin for band events, with Simple Membership support.
+ * Plugin Name: Simple RSVP
+ * Description: Simple RSVP events plugin with Simple Membership support.
  * Version:     1.0.0
  * Author:      Band Admin
  * License:     GPLv2 or later

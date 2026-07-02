@@ -73,6 +73,7 @@ class Band_Event_RSVP_CPT {
         $recurring_count = $recurring_count ? intval( $recurring_count ) : 0;
         $recurring_unit  = $recurring_unit ? $recurring_unit : 'none';
         $recurrence_occurrences = $recurrence_occurrences ? intval( $recurrence_occurrences ) : 0;
+        $contact_options = self::get_contact_person_options();
         ?>
         <p>
             <label for="band_event_location"><?php esc_html_e( 'Location', 'band-event-rsvp' ); ?></label><br />
@@ -87,6 +88,9 @@ class Band_Event_RSVP_CPT {
                 $start_date = $start_dt->format( 'Y-m-d' );
                 $start_time = $start_dt->format( 'H:i' );
             }
+        } else {
+            $start_date = current_time( 'Y-m-d' );
+            $start_time = current_time( 'H:i' );
         }
 
         $end_date = '';
@@ -97,6 +101,9 @@ class Band_Event_RSVP_CPT {
                 $end_date = $end_dt->format( 'Y-m-d' );
                 $end_time = $end_dt->format( 'H:i' );
             }
+        } else {
+            $end_date = current_time( 'Y-m-d' );
+            $end_time = current_time( 'H:i' );
         }
         ?>
         <p>
@@ -135,7 +142,21 @@ class Band_Event_RSVP_CPT {
         </p>
         <p>
             <label for="band_event_contact_person"><?php esc_html_e( 'Contact Person', 'band-event-rsvp' ); ?></label><br />
-            <input type="text" id="band_event_contact_person" name="band_event_contact_person" value="<?php echo esc_attr( $contact ); ?>" class="widefat" />
+            <?php if ( ! empty( $contact_options ) ) : ?>
+                <select id="band_event_contact_person" name="band_event_contact_person" class="widefat">
+                    <option value=""><?php esc_html_e( 'Select a member', 'band-event-rsvp' ); ?></option>
+                    <?php
+                    if ( ! empty( $contact ) && ! isset( $contact_options[ $contact ] ) ) {
+                        echo '<option value="' . esc_attr( $contact ) . '" selected="selected">' . esc_html( $contact ) . '</option>';
+                    }
+                    foreach ( $contact_options as $contact_value => $contact_label ) :
+                        ?>
+                        <option value="<?php echo esc_attr( $contact_value ); ?>" <?php selected( $contact, $contact_value ); ?>><?php echo esc_html( $contact_label ); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            <?php else : ?>
+                <input type="text" id="band_event_contact_person" name="band_event_contact_person" value="<?php echo esc_attr( $contact ); ?>" class="widefat" />
+            <?php endif; ?>
         </p>
         <?php
         $invited_levels = self::get_invited_membership_levels( $post->ID );
@@ -164,6 +185,32 @@ class Band_Event_RSVP_CPT {
         }
 
         return SwpmMembershipLevelUtils::get_all_membership_levels_in_array();
+    }
+
+    public static function get_contact_person_options() {
+        if ( ! class_exists( 'SwpmMemberUtils' ) ) {
+            return array();
+        }
+
+        global $wpdb;
+        $query = "SELECT user_name, first_name, last_name, email FROM {$wpdb->prefix}swpm_members_tbl ORDER BY first_name ASC, last_name ASC, user_name ASC";
+        $rows = $wpdb->get_results( $query );
+        if ( ! is_array( $rows ) ) {
+            return array();
+        }
+
+        $options = array();
+        foreach ( $rows as $row ) {
+            $full_name = trim( (string) $row->first_name . ' ' . (string) $row->last_name );
+            $fallback = ! empty( $row->user_name ) ? (string) $row->user_name : (string) $row->email;
+            $label = ! empty( $full_name ) ? $full_name : $fallback;
+            if ( empty( $label ) ) {
+                continue;
+            }
+            $options[ $label ] = $label;
+        }
+
+        return $options;
     }
 
     public static function get_invited_membership_levels( $post_id ) {
@@ -284,6 +331,7 @@ class Band_Event_RSVP_CPT {
             && $recurring_count > 0
             && ! empty( $start )
             && ( $recurrence_occurrences > 1 || ! empty( $recurrence_end_date ) )
+            && ! get_post_meta( $post_id, '_band_event_skip_recurrence_generation', true )
             && ! get_post_meta( $post_id, '_band_event_recurrence_id', true )
         ) {
             $series_id = Band_Event_RSVP_Admin::get_recurrence_series_id();
