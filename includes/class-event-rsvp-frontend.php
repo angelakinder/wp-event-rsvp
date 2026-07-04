@@ -8,8 +8,6 @@ class Band_Event_RSVP_Frontend {
     protected static $current_loop_event_id = 0;
     protected static $current_block_context_event_id = 0;
     protected static $last_event_query_post_ids = array();
-    protected static $contextless_sequence_index = -1;
-    protected static $contextless_current_event_id = 0;
 
     public static function init() {
         add_shortcode( 'band_event_list', array( __CLASS__, 'render_event_list' ) );
@@ -50,17 +48,6 @@ class Band_Event_RSVP_Frontend {
             return array();
         }
 
-        $order = isset( $query['order'] ) ? strtoupper( sanitize_text_field( (string) $query['order'] ) ) : 'DESC';
-        if ( ! in_array( $order, array( 'ASC', 'DESC' ), true ) ) {
-            $order = 'DESC';
-        }
-
-        $orderby = isset( $query['orderBy'] ) ? sanitize_key( (string) $query['orderBy'] ) : 'date';
-        $allowed_orderby = array( 'date', 'title', 'modified', 'menu_order', 'rand', 'meta_value', 'meta_value_num' );
-        if ( ! in_array( $orderby, $allowed_orderby, true ) ) {
-            $orderby = 'date';
-        }
-
         $per_page = isset( $query['perPage'] ) ? intval( $query['perPage'] ) : 10;
         if ( 0 === $per_page ) {
             $per_page = 10;
@@ -74,8 +61,9 @@ class Band_Event_RSVP_Frontend {
             'fields'                 => 'ids',
             'posts_per_page'         => $per_page,
             'offset'                 => $offset,
-            'orderby'                => $orderby,
-            'order'                  => $order,
+            'orderby'                => 'meta_value',
+            'meta_key'               => '_band_event_start',
+            'order'                  => 'ASC',
             'ignore_sticky_posts'    => true,
             'no_found_rows'          => true,
             'update_post_meta_cache' => false,
@@ -112,7 +100,7 @@ class Band_Event_RSVP_Frontend {
         }
 
         $row_index = -1;
-        $pattern = '/<span class="band-event-(start|end)-datetime">.*?<\/span>(?:<span class="band-event-shortcode-debug"[^>]*data-shortcode="band_event_(start|end)_datetime"[^>]*><\/span>)?/s';
+        $pattern = '/<span class="band-event-(start|end)-datetime">.*?<\/span>/s';
 
         $rewritten = preg_replace_callback(
             $pattern,
@@ -137,11 +125,11 @@ class Band_Event_RSVP_Frontend {
 
                 if ( 'start' === $type ) {
                     $formatted = Band_Event_RSVP_Frontend::format_event_datetime_human( $fields['start'] );
-                    return '<span class="band-event-start-datetime">' . esc_html( $formatted ) . '</span>' . Band_Event_RSVP_Frontend::get_shortcode_debug_marker( 'band_event_start_datetime', $post_id );
+                    return '<span class="band-event-start-datetime">' . esc_html( $formatted ) . '</span>';
                 }
 
                 $formatted = Band_Event_RSVP_Frontend::format_event_datetime_human( $fields['end'] );
-                return '<span class="band-event-end-datetime">' . esc_html( $formatted ) . '</span>' . Band_Event_RSVP_Frontend::get_shortcode_debug_marker( 'band_event_end_datetime', $post_id );
+                return '<span class="band-event-end-datetime">' . esc_html( $formatted ) . '</span>';
             },
             $block_content
         );
@@ -149,25 +137,82 @@ class Band_Event_RSVP_Frontend {
         return is_string( $rewritten ) ? $rewritten : $block_content;
     }
 
+    protected static function rewrite_event_attendees_markup_by_ids( $block_content, $event_ids ) {
+        if ( ! is_string( $block_content ) || '' === $block_content || empty( $event_ids ) ) {
+            return $block_content;
+        }
+
+        $row_index = -1;
+        $pattern = '/<!--band-event-attendees-shortcode-start-->.*?<!--band-event-attendees-shortcode-end-->/s';
+
+        $rewritten = preg_replace_callback(
+            $pattern,
+            function ( $matches ) use ( $event_ids, &$row_index ) {
+                $row_index++;
+
+                if ( $row_index < 0 ) {
+                    $row_index = 0;
+                }
+
+                $max_index = count( $event_ids ) - 1;
+                if ( $row_index > $max_index ) {
+                    $row_index = $max_index;
+                }
+
+                $post_id = absint( $event_ids[ $row_index ] );
+                return '<!--band-event-attendees-shortcode-start-->' . Band_Event_RSVP_Frontend::render_attendee_list( $post_id ) . '<!--band-event-attendees-shortcode-end-->';
+            },
+            $block_content
+        );
+
+        return is_string( $rewritten ) ? $rewritten : $block_content;
+    }
+
+    protected static function get_event_ids_from_rendered_query_markup( $block_content ) {
+        if ( ! is_string( $block_content ) || '' === $block_content ) {
+            return array();
+        }
+
+        $matches = array();
+        if ( ! preg_match_all( '/id=("|\')post-(\d+)\1/i', $block_content, $matches ) ) {
+            return array();
+        }
+
+        $event_ids = array();
+        foreach ( $matches[2] as $matched_id ) {
+            $event_id = absint( $matched_id );
+            if ( $event_id > 0 && 'event' === get_post_type( $event_id ) ) {
+                $event_ids[] = $event_id;
+            }
+        }
+
+        return array_values( array_unique( $event_ids ) );
+    }
+
     public static function fix_contextless_event_datetime_output( $block_content, $parsed_block, $instance ) {
         if ( ! is_string( $block_content ) || '' === $block_content ) {
             return $block_content;
         }
 
-        if ( false === strpos( $block_content, 'band-event-start-datetime' ) && false === strpos( $block_content, 'band-event-end-datetime' ) ) {
+        if (
+            false === strpos( $block_content, 'band-event-start-datetime' )
+            && false === strpos( $block_content, 'band-event-end-datetime' )
+            && false === strpos( $block_content, 'band-event-attendees-shortcode-start' )
+        ) {
             return $block_content;
         }
 
-        if ( empty( self::$last_event_query_post_ids ) || ! is_array( self::$last_event_query_post_ids ) ) {
-            return $block_content;
+        $event_ids = self::get_event_ids_from_rendered_query_markup( $block_content );
+        if ( empty( $event_ids ) && ! empty( self::$last_event_query_post_ids ) && is_array( self::$last_event_query_post_ids ) ) {
+            $event_ids = array_values( array_filter( array_map( 'absint', self::$last_event_query_post_ids ) ) );
         }
 
-        $event_ids = array_values( array_filter( array_map( 'absint', self::$last_event_query_post_ids ) ) );
         if ( count( $event_ids ) <= 1 ) {
             return $block_content;
         }
 
-        return self::rewrite_event_datetime_markup_by_ids( $block_content, $event_ids );
+        $block_content = self::rewrite_event_datetime_markup_by_ids( $block_content, $event_ids );
+        return self::rewrite_event_attendees_markup_by_ids( $block_content, $event_ids );
     }
 
     public static function fix_query_loop_event_datetime_output( $block_content, $parsed_block, $instance ) {
@@ -175,20 +220,26 @@ class Band_Event_RSVP_Frontend {
             return $block_content;
         }
 
-        if ( false === strpos( $block_content, 'band-event-start-datetime' ) && false === strpos( $block_content, 'band-event-end-datetime' ) ) {
+        if (
+            false === strpos( $block_content, 'band-event-start-datetime' )
+            && false === strpos( $block_content, 'band-event-end-datetime' )
+            && false === strpos( $block_content, 'band-event-attendees-shortcode-start' )
+        ) {
             return $block_content;
         }
 
-        $event_ids = self::get_event_ids_from_query_block_attrs( $parsed_block );
+        $event_ids = self::get_event_ids_from_rendered_query_markup( $block_content );
+        if ( empty( $event_ids ) ) {
+            $event_ids = self::get_event_ids_from_query_block_attrs( $parsed_block );
+        }
         if ( empty( $event_ids ) ) {
             return $block_content;
         }
 
         self::$last_event_query_post_ids = $event_ids;
-        self::$contextless_sequence_index = -1;
-        self::$contextless_current_event_id = 0;
 
-        return self::rewrite_event_datetime_markup_by_ids( $block_content, $event_ids );
+        $block_content = self::rewrite_event_datetime_markup_by_ids( $block_content, $event_ids );
+        return self::rewrite_event_attendees_markup_by_ids( $block_content, $event_ids );
     }
 
     public static function capture_event_id_from_render_block_context( $context, $parsed_block, $parent_block ) {
@@ -225,41 +276,6 @@ class Band_Event_RSVP_Frontend {
         }
 
         return $candidate_id;
-    }
-
-    protected static function get_event_id_from_contextless_sequence( $shortcode_tag ) {
-        if ( empty( self::$last_event_query_post_ids ) || ! is_array( self::$last_event_query_post_ids ) ) {
-            return 0;
-        }
-
-        $is_row_starter = in_array(
-            (string) $shortcode_tag,
-            array( 'band_event_start_datetime', 'band_event_detail', 'band_event_actions' ),
-            true
-        );
-
-        if ( $is_row_starter || self::$contextless_current_event_id <= 0 ) {
-            self::$contextless_sequence_index++;
-            if ( self::$contextless_sequence_index < 0 ) {
-                self::$contextless_sequence_index = 0;
-            }
-
-            $max_index = count( self::$last_event_query_post_ids ) - 1;
-            if ( self::$contextless_sequence_index > $max_index ) {
-                self::$contextless_sequence_index = $max_index;
-            }
-
-            $candidate_id = absint( self::$last_event_query_post_ids[ self::$contextless_sequence_index ] );
-            if ( $candidate_id > 0 && 'event' === get_post_type( $candidate_id ) ) {
-                self::$contextless_current_event_id = $candidate_id;
-            }
-        }
-
-        if ( self::$contextless_current_event_id > 0 && 'event' === get_post_type( self::$contextless_current_event_id ) ) {
-            return self::$contextless_current_event_id;
-        }
-
-        return 0;
     }
 
     public static function ensure_shortcode_block_uses_post_context() {
@@ -385,11 +401,6 @@ class Band_Event_RSVP_Frontend {
             );
         }
 
-        $debug_marker = sprintf(
-            '<span class="band-event-debug-marker" data-band-event-context-post-id="%d" style="display:none !important;"></span>',
-            intval( $context_post_id )
-        );
-
         $previous_context_event_id = self::$current_block_context_event_id;
         $previous_global_post = isset( $GLOBALS['post'] ) ? $GLOBALS['post'] : null;
 
@@ -411,39 +422,7 @@ class Band_Event_RSVP_Frontend {
 
         self::$current_block_context_event_id = $previous_context_event_id;
 
-        return $rendered . $debug_marker;
-    }
-
-    protected static function should_render_shortcode_debug() {
-        return isset( $_GET['band_event_debug'] ) && '1' === (string) wp_unslash( $_GET['band_event_debug'] );
-    }
-
-    protected static function get_shortcode_debug_marker( $shortcode_tag, $post_id ) {
-        if ( ! self::should_render_shortcode_debug() ) {
-            return '';
-        }
-
-        $global_post_id = 0;
-        $global_post_type = '';
-        $contextless_current_event_id = absint( self::$contextless_current_event_id );
-        $contextless_sequence_index = intval( self::$contextless_sequence_index );
-        if ( isset( $GLOBALS['post'] ) && $GLOBALS['post'] instanceof WP_Post ) {
-            $global_post_id = intval( $GLOBALS['post']->ID );
-            $global_post_type = (string) $GLOBALS['post']->post_type;
-        }
-
-        return sprintf(
-            '<span class="band-event-shortcode-debug" data-shortcode="%s" data-post-id="%d" data-block-context-post-id="%d" data-loop-event-id="%d" data-query-cursor-event-id="%d" data-contextless-current-event-id="%d" data-contextless-sequence-index="%d" data-global-post-id="%d" data-global-post-type="%s" style="display:none !important;"></span>',
-            esc_attr( (string) $shortcode_tag ),
-            intval( $post_id ),
-            intval( self::$current_block_context_event_id ),
-            intval( self::$current_loop_event_id ),
-            intval( self::get_event_id_from_wp_query_cursor() ),
-            $contextless_current_event_id,
-            $contextless_sequence_index,
-            intval( $global_post_id ),
-            esc_attr( $global_post_type )
-        );
+        return $rendered;
     }
 
     public static function capture_current_loop_event_id( $post ) {
@@ -648,15 +627,35 @@ class Band_Event_RSVP_Frontend {
     }
 
     public static function filter_event_archive_query( $query ) {
-        if ( is_admin() || ! $query->is_main_query() || ! $query->is_post_type_archive( 'event' ) ) {
+        if ( is_admin() || ! ( $query instanceof WP_Query ) ) {
+            return;
+        }
+
+        $post_type = $query->get( 'post_type' );
+        $is_event_query = false;
+
+        if ( 'event' === $post_type ) {
+            $is_event_query = true;
+        } elseif ( is_array( $post_type ) && in_array( 'event', $post_type, true ) ) {
+            $is_event_query = true;
+        } elseif ( $query->is_post_type_archive( 'event' ) ) {
+            $is_event_query = true;
+        }
+
+        if ( ! $is_event_query ) {
+            return;
+        }
+
+        // Always sort frontend event queries by start datetime, nearest event first.
+        $query->set( 'orderby', 'meta_value' );
+        $query->set( 'meta_key', '_band_event_start' );
+        $query->set( 'order', 'ASC' );
+
+        if ( ! $query->is_main_query() || ! $query->is_post_type_archive( 'event' ) ) {
             return;
         }
 
         $today_midnight = date( 'Y-m-d 00:00:00', current_time( 'timestamp' ) );
-
-        $query->set( 'orderby', 'meta_value' );
-        $query->set( 'meta_key', '_band_event_start' );
-        $query->set( 'order', 'ASC' );
         $query->set( 'meta_query', self::get_upcoming_event_meta_query( $today_midnight ) );
     }
 
@@ -702,8 +701,6 @@ class Band_Event_RSVP_Frontend {
 
         if ( ! empty( $visible_event_ids ) ) {
             self::$last_event_query_post_ids = array_values( array_unique( $visible_event_ids ) );
-            self::$contextless_sequence_index = -1;
-            self::$contextless_current_event_id = 0;
         }
 
         return $visible_posts;
@@ -1059,11 +1056,6 @@ class Band_Event_RSVP_Frontend {
             return $query_cursor_event_id;
         }
 
-        $contextless_event_id = self::get_event_id_from_contextless_sequence( $shortcode_tag );
-        if ( $contextless_event_id > 0 ) {
-            return $contextless_event_id;
-        }
-
         // Prefer the current loop context before broad global fallbacks.
         $context_post_id = self::resolve_event_post_id_from_context();
         if ( $context_post_id > 0 && 'event' === get_post_type( $context_post_id ) ) {
@@ -1100,7 +1092,7 @@ class Band_Event_RSVP_Frontend {
         }
 
         $formatted = self::format_event_datetime_human( $fields['start'] );
-        return '<span class="band-event-start-datetime">' . esc_html( $formatted ) . '</span>' . self::get_shortcode_debug_marker( 'band_event_start_datetime', $post_id );
+        return '<span class="band-event-start-datetime">' . esc_html( $formatted ) . '</span>';
     }
 
     public static function render_event_end_datetime_shortcode( $atts ) {
@@ -1115,7 +1107,7 @@ class Band_Event_RSVP_Frontend {
         }
 
         $formatted = self::format_event_datetime_human( $fields['end'] );
-        return '<span class="band-event-end-datetime">' . esc_html( $formatted ) . '</span>' . self::get_shortcode_debug_marker( 'band_event_end_datetime', $post_id );
+        return '<span class="band-event-end-datetime">' . esc_html( $formatted ) . '</span>';
     }
 
     public static function render_event_member_levels_shortcode( $atts ) {
@@ -1182,7 +1174,7 @@ class Band_Event_RSVP_Frontend {
             return '';
         }
 
-        return self::render_attendee_list( $post_id );
+        return '<!--band-event-attendees-shortcode-start-->' . self::render_attendee_list( $post_id ) . '<!--band-event-attendees-shortcode-end-->';
     }
 
     public static function resolve_event_post_id_from_context( $raw_id = 0 ) {
