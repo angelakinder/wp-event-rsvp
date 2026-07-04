@@ -160,7 +160,7 @@ class Band_Event_RSVP_Admin {
                             <th scope="row"><label for="band_event_rsvp_reminder_template"><?php esc_html_e( 'Reminder email template', 'band-event-rsvp' ); ?></label></th>
                             <td>
                                 <textarea id="band_event_rsvp_reminder_template" name="band_event_rsvp_reminder_template" rows="8" class="large-text code"><?php echo esc_textarea( $template ); ?></textarea>
-                                <p class="description"><?php esc_html_e( 'Available placeholders: {display_name}, {event_title}, {event_start}, {event_location}, {event_url}, {site_name}, {site_url}.', 'band-event-rsvp' ); ?></p>
+                                <p class="description"><?php esc_html_e( 'Available placeholders: {display_name}, {event_title}, {event_start}, {event_location}, {event_url}, {site_name}, {site_url}, {rsvp_buttons}, {rsvp_yes_url}, {rsvp_maybe_url}, {rsvp_no_url}.', 'band-event-rsvp' ); ?></p>
                             </td>
                         </tr>
                         <tr>
@@ -279,12 +279,20 @@ class Band_Event_RSVP_Admin {
         $end_time_value = isset( $_POST['band_event_end_time'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_end_time'] ) ) : $default_end_time;
         $recurring_count_value = isset( $_POST['band_event_recurring_count'] ) ? intval( wp_unslash( $_POST['band_event_recurring_count'] ) ) : 0;
         $recurring_unit_value = isset( $_POST['band_event_recurring_unit'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurring_unit'] ) ) : 'none';
-        $recurrence_occurrences_value = isset( $_POST['band_event_recurrence_occurrences'] ) ? intval( wp_unslash( $_POST['band_event_recurrence_occurrences'] ) ) : 0;
-        $recurrence_occurrences_value = min( self::MAX_RECURRING_EVENTS, max( 0, $recurrence_occurrences_value ) );
+        $recurrence_occurrences_value = isset( $_POST['band_event_recurrence_occurrences'] ) ? intval( wp_unslash( $_POST['band_event_recurrence_occurrences'] ) ) : 1;
+        $recurrence_occurrences_value = min( self::MAX_RECURRING_EVENTS, max( 1, $recurrence_occurrences_value ) );
         $recurrence_end_date_value = isset( $_POST['band_event_recurrence_end_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurrence_end_date'] ) ) : '';
         $send_email_now_value = isset( $_POST['band_event_send_email_now'] ) ? 1 : 0;
         $contact_value = isset( $_POST['band_event_contact_person'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_contact_person'] ) ) : '';
         $contact_options = class_exists( 'Band_Event_RSVP_CPT' ) ? Band_Event_RSVP_CPT::get_contact_person_options() : array();
+        $available_levels = class_exists( 'Band_Event_RSVP_CPT' ) ? Band_Event_RSVP_CPT::get_available_membership_levels() : array();
+        $selected_invited_levels = array();
+        if ( isset( $_POST['band_event_invited_levels'] ) ) {
+            $raw_levels = wp_unslash( $_POST['band_event_invited_levels'] );
+            if ( is_array( $raw_levels ) ) {
+                $selected_invited_levels = array_values( array_unique( array_filter( array_map( 'absint', $raw_levels ) ) ) );
+            }
+        }
 
         if ( empty( $contact_value ) && is_user_logged_in() ) {
             $current_user = wp_get_current_user();
@@ -312,7 +320,7 @@ class Band_Event_RSVP_Admin {
         $output .= '<div class="date-time-field"><label>' . esc_html__( 'End Time', 'band-event-rsvp' ) . '<br /><input type="time" name="band_event_end_time" class="widefat" value="' . esc_attr( $end_time_value ) . '"></label></div>';
         $output .= '</div>';
         $output .= '<p><label>' . esc_html__( 'Recurring every', 'band-event-rsvp' ) . '<br /><input type="number" name="band_event_recurring_count" min="0" class="small-text" value="' . esc_attr( $recurring_count_value ) . '"> <select name="band_event_recurring_unit"><option value="none"' . selected( $recurring_unit_value, 'none', false ) . '>' . esc_html__( 'None', 'band-event-rsvp' ) . '</option><option value="days"' . selected( $recurring_unit_value, 'days', false ) . '>' . esc_html__( 'Days', 'band-event-rsvp' ) . '</option><option value="weeks"' . selected( $recurring_unit_value, 'weeks', false ) . '>' . esc_html__( 'Weeks', 'band-event-rsvp' ) . '</option><option value="months"' . selected( $recurring_unit_value, 'months', false ) . '>' . esc_html__( 'Months', 'band-event-rsvp' ) . '</option></select></label></p>';
-        $output .= '<p><label>' . esc_html__( 'Number of occurrences', 'band-event-rsvp' ) . '<br /><input type="number" name="band_event_recurrence_occurrences" min="2" max="' . esc_attr( self::MAX_RECURRING_EVENTS ) . '" class="small-text" value="' . esc_attr( $recurrence_occurrences_value ) . '"></label></p>';
+        $output .= '<p><label>' . esc_html__( 'Number of occurrences', 'band-event-rsvp' ) . '<br /><input type="number" name="band_event_recurrence_occurrences" min="1" max="' . esc_attr( self::MAX_RECURRING_EVENTS ) . '" class="small-text" value="' . esc_attr( $recurrence_occurrences_value ) . '"></label></p>';
         $output .= '<p><label>' . esc_html__( 'Or end date', 'band-event-rsvp' ) . '<br /><input type="date" name="band_event_recurrence_end_date" class="widefat" value="' . esc_attr( $recurrence_end_date_value ) . '" /></label></p>';
         $output .= '<p><label><input type="checkbox" name="band_event_send_email_now" value="1" ' . checked( $send_email_now_value, 1, false ) . ' /> ' . esc_html__( 'Send invitation email now after creating this event', 'band-event-rsvp' ) . '</label></p>';
         if ( ! empty( $contact_options ) ) {
@@ -328,6 +336,17 @@ class Band_Event_RSVP_Admin {
             $output .= '</select></label></p>';
         } else {
             $output .= '<p><label>' . esc_html__( 'Contact Person', 'band-event-rsvp' ) . '<br /><input type="text" name="band_event_contact_person" class="widefat" value="' . esc_attr( $contact_value ) . '"></label></p>';
+        }
+        if ( ! empty( $available_levels ) ) {
+            $output .= '<p><label>' . esc_html__( 'Invite membership levels', 'band-event-rsvp' ) . '<br />';
+            $output .= '<select name="band_event_invited_levels[]" class="widefat" multiple size="4">';
+            foreach ( $available_levels as $level_id => $level_label ) {
+                $level_id = absint( $level_id );
+                $is_selected = in_array( $level_id, $selected_invited_levels, true );
+                $output .= '<option value="' . esc_attr( $level_id ) . '"' . selected( $is_selected, true, false ) . '>' . esc_html( $level_label ) . '</option>';
+            }
+            $output .= '</select></label><br />';
+            $output .= '<span class="description">' . esc_html__( 'Select invited membership levels (leave blank to invite no one).', 'band-event-rsvp' ) . '</span></p>';
         }
         $output .= '<p><button type="submit" name="band_event_submit" class="button button-primary">' . esc_html__( 'Create Event', 'band-event-rsvp' ) . '</button></p>';
         $output .= '</form>';
@@ -401,10 +420,17 @@ class Band_Event_RSVP_Admin {
         $location = isset( $_POST['band_event_location'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_location'] ) ) : '';
         $recurring_count = isset( $_POST['band_event_recurring_count'] ) ? intval( wp_unslash( $_POST['band_event_recurring_count'] ) ) : 0;
         $recurring_unit = isset( $_POST['band_event_recurring_unit'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurring_unit'] ) ) : 'none';
-        $recurrence_occurrences = isset( $_POST['band_event_recurrence_occurrences'] ) ? intval( wp_unslash( $_POST['band_event_recurrence_occurrences'] ) ) : 0;
-        $recurrence_occurrences = min( self::MAX_RECURRING_EVENTS, max( 0, $recurrence_occurrences ) );
+        $recurrence_occurrences = isset( $_POST['band_event_recurrence_occurrences'] ) ? intval( wp_unslash( $_POST['band_event_recurrence_occurrences'] ) ) : 1;
+        $recurrence_occurrences = min( self::MAX_RECURRING_EVENTS, max( 1, $recurrence_occurrences ) );
         $recurrence_end_date = isset( $_POST['band_event_recurrence_end_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurrence_end_date'] ) ) : '';
         $contact = isset( $_POST['band_event_contact_person'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_contact_person'] ) ) : '';
+        $invited_levels = array();
+        if ( isset( $_POST['band_event_invited_levels'] ) ) {
+            $raw_levels = wp_unslash( $_POST['band_event_invited_levels'] );
+            if ( is_array( $raw_levels ) ) {
+                $invited_levels = array_values( array_unique( array_filter( array_map( 'absint', $raw_levels ) ) ) );
+            }
+        }
 
         if ( empty( $contact ) && is_user_logged_in() ) {
             $current_user = wp_get_current_user();
@@ -421,8 +447,8 @@ class Band_Event_RSVP_Admin {
             return '<p>' . esc_html__( 'Recurring events require a start date/time.', 'band-event-rsvp' ) . '</p>';
         }
 
-        if ( 'none' !== $recurring_unit && $recurrence_occurrences < 2 && empty( $recurrence_end_date ) ) {
-            return '<p>' . esc_html__( 'Recurring events require either a number of occurrences or an end date.', 'band-event-rsvp' ) . '</p>';
+        if ( $recurrence_occurrences > 1 && ( 'none' === $recurring_unit || $recurring_count < 1 ) ) {
+            return '<p>' . esc_html__( 'When number of occurrences is greater than 1, please fill in the Recurring every settings.', 'band-event-rsvp' ) . '</p>';
         }
 
         update_post_meta( $post_id, '_band_event_location', $location );
@@ -431,6 +457,11 @@ class Band_Event_RSVP_Admin {
         update_post_meta( $post_id, '_band_event_recurring_count', $recurring_count );
         update_post_meta( $post_id, '_band_event_recurring_unit', $recurring_unit );
         update_post_meta( $post_id, '_band_event_contact_person', $contact );
+        if ( ! empty( $invited_levels ) ) {
+            update_post_meta( $post_id, '_band_event_invited_levels', $invited_levels );
+        } else {
+            delete_post_meta( $post_id, '_band_event_invited_levels' );
+        }
 
         if ( 'none' !== $recurring_unit && ( $recurrence_occurrences > 1 || ! empty( $recurrence_end_date ) ) ) {
             $series_id = self::get_recurrence_series_id();
@@ -452,7 +483,8 @@ class Band_Event_RSVP_Admin {
                 $contact,
                 $series_id,
                 $recurrence_occurrences,
-                $recurrence_end_date
+                $recurrence_end_date,
+                $invited_levels
             );
 
             if ( $series_total > 1 ) {
@@ -509,7 +541,7 @@ class Band_Event_RSVP_Admin {
         }
     }
 
-    public static function create_recurrence_series_posts( $base_post_id, $title, $content, $location, $start, $end, $interval_count, $interval_unit, $contact, $series_id, $occurrences, $end_date ) {
+    public static function create_recurrence_series_posts( $base_post_id, $title, $content, $location, $start, $end, $interval_count, $interval_unit, $contact, $series_id, $occurrences, $end_date, $invited_levels = array() ) {
         if ( 'none' === $interval_unit || $interval_count < 1 || empty( $start ) ) {
             return 1;
         }
@@ -588,6 +620,11 @@ class Band_Event_RSVP_Admin {
             update_post_meta( $next_post_id, '_band_event_recurring_count', $interval_count );
             update_post_meta( $next_post_id, '_band_event_recurring_unit', $interval_unit );
             update_post_meta( $next_post_id, '_band_event_contact_person', $contact );
+            if ( ! empty( $invited_levels ) ) {
+                update_post_meta( $next_post_id, '_band_event_invited_levels', array_values( array_unique( array_filter( array_map( 'absint', $invited_levels ) ) ) ) );
+            } else {
+                delete_post_meta( $next_post_id, '_band_event_invited_levels' );
+            }
             update_post_meta( $next_post_id, '_band_event_recurrence_id', $series_id );
             update_post_meta( $next_post_id, '_band_event_recurrence_index', $index );
             update_post_meta( $next_post_id, '_band_event_recurrence_total', 0 );

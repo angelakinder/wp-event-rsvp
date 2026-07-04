@@ -24,6 +24,7 @@ class Band_Event_RSVP_Frontend {
         add_action( 'wp', array( __CLASS__, 'handle_rsvp_submission' ) );
         add_action( 'the_post', array( __CLASS__, 'capture_current_loop_event_id' ) );
         add_action( 'template_redirect', array( __CLASS__, 'handle_calendar_download' ) );
+        add_action( 'template_redirect', array( __CLASS__, 'handle_quick_rsvp_link' ) );
         add_action( 'template_redirect', array( __CLASS__, 'enforce_single_event_access' ) );
         add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_styles' ) );
         add_action( 'pre_get_posts', array( __CLASS__, 'filter_event_archive_query' ) );
@@ -1515,6 +1516,75 @@ class Band_Event_RSVP_Frontend {
         $responses[ $user_id ] = array(
             'status'       => $status,
             'comment'      => $comment,
+            'display_name' => sanitize_text_field( $full_name ),
+            'updated'      => current_time( 'mysql' ),
+        );
+
+        update_post_meta( $post_id, '_band_event_rsvps', $responses );
+
+        wp_safe_redirect( add_query_arg( 'rsvp_saved', '1', get_permalink( $post_id ) ) );
+        exit;
+    }
+
+    public static function handle_quick_rsvp_link() {
+        if ( ! isset( $_GET['band_event_rsvp_quick'] ) ) {
+            return;
+        }
+
+        $post_id = isset( $_GET['band_event_id'] ) ? absint( wp_unslash( $_GET['band_event_id'] ) ) : 0;
+        $target_user_id = isset( $_GET['band_event_user_id'] ) ? absint( wp_unslash( $_GET['band_event_user_id'] ) ) : 0;
+        $status = isset( $_GET['band_event_response'] ) ? sanitize_key( wp_unslash( $_GET['band_event_response'] ) ) : '';
+        $nonce = isset( $_GET['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ) : '';
+
+        if ( $post_id <= 0 || $target_user_id <= 0 || '' === $status || '' === $nonce ) {
+            wp_die( esc_html__( 'Invalid RSVP link.', 'band-event-rsvp' ) );
+        }
+
+        if ( ! in_array( $status, array( 'yes', 'maybe', 'no' ), true ) ) {
+            wp_die( esc_html__( 'Invalid RSVP response.', 'band-event-rsvp' ) );
+        }
+
+        if ( ! wp_verify_nonce( $nonce, 'band_event_quick_rsvp_' . $post_id . '_' . $target_user_id . '_' . $status ) ) {
+            wp_die( esc_html__( 'This RSVP link has expired or is invalid.', 'band-event-rsvp' ) );
+        }
+
+        if ( ! is_user_logged_in() ) {
+            $return_url = get_permalink( $post_id );
+            if ( isset( $_SERVER['REQUEST_URI'] ) ) {
+                $request_path = wp_unslash( $_SERVER['REQUEST_URI'] );
+                if ( is_string( $request_path ) && '' !== $request_path ) {
+                    $return_url = home_url( $request_path );
+                }
+            }
+
+            wp_safe_redirect( wp_login_url( $return_url ) );
+            exit;
+        }
+
+        $current_user_id = get_current_user_id();
+        if ( $current_user_id !== $target_user_id ) {
+            wp_die( esc_html__( 'This RSVP link is for a different member account.', 'band-event-rsvp' ) );
+        }
+
+        if ( ! self::can_current_user_rsvp( $post_id ) ) {
+            wp_die( esc_html__( 'You are not invited to RSVP to this event.', 'band-event-rsvp' ) );
+        }
+
+        $fields = Band_Event_RSVP_CPT::get_event_fields( $post_id );
+        if ( ! self::is_event_open_for_rsvp( $fields ) ) {
+            wp_die( esc_html__( 'Cannot RSVP to past events.', 'band-event-rsvp' ) );
+        }
+
+        $user = wp_get_current_user();
+        $full_name = trim( (string) $user->first_name . ' ' . (string) $user->last_name );
+        if ( empty( $full_name ) ) {
+            $full_name = $user->user_login;
+        }
+
+        $responses = self::get_rsvp_list( $post_id );
+        $responses[ $current_user_id ] = array(
+            'status'       => $status,
+            'comment'      => isset( $responses[ $current_user_id ]['comment'] ) ? (string) $responses[ $current_user_id ]['comment'] : '',
             'display_name' => sanitize_text_field( $full_name ),
             'updated'      => current_time( 'mysql' ),
         );

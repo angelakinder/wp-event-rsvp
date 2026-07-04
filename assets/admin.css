@@ -1,1 +1,138 @@
-.band-event-form{max-width:700px;margin:2rem auto;padding:2rem;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}.band-event-form p{margin:1.25rem 0}.band-event-form label{display:block;font-weight:600;margin-bottom:0.5rem;color:#2c3e50}.band-event-form input[type=text],.band-event-form input[type=date],.band-event-form input[type=time],.band-event-form input[type=datetime-local],.band-event-form textarea,.band-event-form select{width:100%;margin-top:0.35rem;padding:0.75rem;border:1px solid #ccc;border-radius:4px;font-size:0.95rem;font-family:inherit;box-sizing:border-box}.band-event-form input[type=text]:focus,.band-event-form input[type=date]:focus,.band-event-form input[type=time]:focus,.band-event-form input[type=datetime-local]:focus,.band-event-form textarea:focus,.band-event-form select:focus{outline:none;border-color:#3498db;box-shadow:0 0 0 3px rgba(52,152,219,0.1)}.band-event-form textarea{resize:vertical;min-height:120px;line-height:1.5}.band-event-form select{appearance:none;background-image:url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");background-repeat:no-repeat;background-position:right 0.75rem center;background-size:1.5em;padding-right:2.5rem}.band-event-form input[type=number]{width:100px;text-align:center}.band-event-form .button{margin-top:1.5rem;padding:0.75rem 2rem;background:#3498db;color:#fff;border:none;border-radius:4px;font-size:1rem;font-weight:600;cursor:pointer;transition:background-color 0.3s ease}.band-event-form .button:hover{background-color:#2980b9}.notice.notice-success.is-dismissible{background:#d4edda;border-left:4px solid #28a745;color:#155724;padding:1rem;border-radius:4px;margin:1.25rem 0}.band-event-form .date-time-row{display:flex;gap:1rem;flex-wrap:wrap}.band-event-form .date-time-field{flex:1 1 200px}.band-event-settings-form .card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:1.5rem;margin-bottom:1.5rem}.band-event-settings-form .card h2{margin-top:0}.band-event-settings-form .description{margin:0.25rem 0 0;color:#6b7280}.band-event-settings-form .form-table th{padding:1rem 1rem 0 0;font-weight:600}.band-event-settings-form .form-table td{padding:0.75rem 0}
+.band-event-form {
+	margin: auto;
+	width: 50rem;
+	padding: 1.25rem;
+	border: 1px solid #cfd6dd;
+	border-radius: 8px;
+	background: #f7f9fb;
+}
+
+.band-event-form p {
+	margin: 0 0 1rem;
+}
+
+.band-event-form label {
+	display: block;
+	font-weight: 600;
+	color: #2f3841;
+}
+
+.band-event-form input[type="text"],
+.band-event-form input[type="date"],
+.band-event-form input[type="time"],
+.band-event-form input[type="number"],
+.band-event-form select,
+.band-event-form textarea {
+	width: 100%;
+	box-sizing: border-box;
+	margin-top: 0.35rem;
+	padding: 0.55rem 0.65rem;
+	border: 1px solid #bcc6cf;
+	border-radius: 4px;
+	background: #fff;
+}
+
+.band-event-form select[multiple] {
+	min-height: 8.75rem;
+	padding: 0.4rem;
+}
+
+.band-event-form .description {
+	display: inline-block;
+	margin-top: 0.35rem;
+	font-size: 0.84rem;
+	color: #5f6f80;
+}
+
+.band-event-form input[type="checkbox"] {
+	width: auto;
+	margin-right: 0.45rem;
+	vertical-align: middle;
+}
+
+.band-event-form input:focus,
+.band-event-form select:focus,
+.band-event-form textarea:focus {
+	outline: 2px solid rgba(206, 71, 55, 0.24);
+	outline-offset: 0;
+	border-color: #ce4737;
+}
+
+.band-event-form .date-time-row {
+	display: flex;
+	gap: 0.9rem;
+}
+
+.band-event-form .date-time-field {
+	flex: 1;
+	min-width: 0;
+}
+
+.band-event-form .small-text {
+	width: 90px;
+}
+
+.band-event-form .button.button-primary {
+	background: #ce4737;
+	border-color: #b53c2f;
+	color: #fff;
+}
+
+.band-event-form .button.button-primary:hover {
+	background: #b53c2f;
+	border-color: #983126;
+}
+
+.band-event-form + .notice {
+	margin-top: 1rem;
+}
+
+.notice.notice-success.is-dismissible {
+	background: #d4edda;
+	border-left: 4px solid #28a745;
+	color: #155724;
+	padding: 1rem;
+	border-radius: 4px;
+	margin: 1.25rem 0;
+}
+
+.band-event-settings-form .card {
+	background: #fff;
+	border: 1px solid #ddd;
+	border-radius: 8px;
+	padding: 1.5rem;
+	margin-bottom: 1.5rem;
+}
+
+.band-event-settings-form .card h2 {
+	margin-top: 0;
+}
+
+.band-event-settings-form .description {
+	margin: 0.25rem 0 0;
+	color: #6b7280;
+}
+
+.band-event-settings-form .form-table th {
+	padding: 1rem 1rem 0 0;
+	font-weight: 600;
+}
+
+.band-event-settings-form .form-table td {
+	padding: 0.75rem 0;
+}
+
+@media (max-width: 700px) {
+	.band-event-form {
+		width: 100%;
+		padding: 1rem;
+	}
+
+	.band-event-form .date-time-row {
+		display: block;
+	}
+
+	.band-event-form .date-time-field {
+		margin-bottom: 0.8rem;
+	}
+}

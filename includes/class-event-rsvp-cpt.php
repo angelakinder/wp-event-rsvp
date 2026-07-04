@@ -95,8 +95,8 @@ class Band_Event_RSVP_CPT {
 
         $recurring_count = $recurring_count ? intval( $recurring_count ) : 0;
         $recurring_unit  = $recurring_unit ? $recurring_unit : 'none';
-        $recurrence_occurrences = $recurrence_occurrences ? intval( $recurrence_occurrences ) : 0;
-        $recurrence_occurrences = min( 104, max( 0, $recurrence_occurrences ) );
+        $recurrence_occurrences = $recurrence_occurrences ? intval( $recurrence_occurrences ) : 1;
+        $recurrence_occurrences = min( 104, max( 1, $recurrence_occurrences ) );
 
         if ( empty( $contact ) && is_user_logged_in() ) {
             $current_user = wp_get_current_user();
@@ -171,7 +171,7 @@ class Band_Event_RSVP_CPT {
         </p>
         <p>
             <label for="band_event_recurrence_occurrences"><?php esc_html_e( 'Number of occurrences', 'band-event-rsvp' ); ?></label><br />
-            <input type="number" id="band_event_recurrence_occurrences" name="band_event_recurrence_occurrences" value="<?php echo esc_attr( $recurrence_occurrences ); ?>" min="0" max="104" class="small-text" />
+            <input type="number" id="band_event_recurrence_occurrences" name="band_event_recurrence_occurrences" value="<?php echo esc_attr( $recurrence_occurrences ); ?>" min="1" max="104" class="small-text" />
         </p>
         <p>
             <label for="band_event_recurrence_end_date"><?php esc_html_e( 'Or end date', 'band-event-rsvp' ); ?></label><br />
@@ -430,10 +430,14 @@ class Band_Event_RSVP_CPT {
 
         $recurring_count = isset( $_POST['band_event_recurring_count'] ) ? intval( $_POST['band_event_recurring_count'] ) : 0;
         $recurring_unit  = isset( $_POST['band_event_recurring_unit'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurring_unit'] ) ) : 'none';
-        $recurrence_occurrences = isset( $_POST['band_event_recurrence_occurrences'] ) ? intval( $_POST['band_event_recurrence_occurrences'] ) : 0;
-        $recurrence_occurrences = min( 104, max( 0, $recurrence_occurrences ) );
+        $recurrence_occurrences = isset( $_POST['band_event_recurrence_occurrences'] ) ? intval( $_POST['band_event_recurrence_occurrences'] ) : 1;
+        $recurrence_occurrences = min( 104, max( 1, $recurrence_occurrences ) );
         $recurrence_end_date = isset( $_POST['band_event_recurrence_end_date'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_recurrence_end_date'] ) ) : '';
         $contact   = isset( $_POST['band_event_contact_person'] ) ? sanitize_text_field( wp_unslash( $_POST['band_event_contact_person'] ) ) : '';
+
+        if ( $recurrence_occurrences > 1 && ( 'none' === $recurring_unit || $recurring_count < 1 ) ) {
+            $recurrence_occurrences = 1;
+        }
 
         if ( empty( $contact ) && is_user_logged_in() ) {
             $current_user = wp_get_current_user();

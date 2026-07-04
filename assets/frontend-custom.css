@@ -42,14 +42,6 @@
   box-shadow: 0 0 10px rgba(231,76,60,0.3);
 }
 
-.band-event-calendar {
-  margin: 0.75rem 1.5rem 1rem;
-}
-
-.band-event-detail .band-event-calendar {
-  margin: 0.75rem 0 1.25rem;
-}
-
 .band-event-calendar-link {
   display: inline-block;
   padding: 0.45rem 0.8rem;
@@ -233,7 +225,8 @@
 
 /* Front-end admin event management form */
 .band-event-form {
-  margin: 1.5rem 0;
+  margin: auto;
+  width: 50rem;
   padding: 1.25rem;
   border: 1px solid #cfd6dd;
   border-radius: 8px;
@@ -302,7 +295,6 @@
 
 /* Admin controls shown on event cards when user can edit posts */
 .band-event-admin-actions {
-  margin: 0.35rem 1.5rem 0.85rem;
   font-size: 0.9rem;
 }
 

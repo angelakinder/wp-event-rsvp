@@ -30,6 +30,7 @@ class Band_Event_RSVP_Reminder {
         return "Hi {display_name},\n\n"
             . "This is a reminder that \"{event_title}\" starts on {event_start} at {event_location}.\n\n"
             . "View event: {event_url}\n\n"
+            . "Quick RSVP:\n{rsvp_buttons}\n\n"
             . "If your plans have changed, please update your RSVP.\n\n"
             . "{site_name}\n{site_url}";
     }
@@ -69,6 +70,12 @@ class Band_Event_RSVP_Reminder {
             $location = __( 'TBD', 'band-event-rsvp' );
         }
 
+        $rsvp_yes_url = self::get_quick_rsvp_url( $post_id, intval( $user->ID ), 'yes' );
+        $rsvp_maybe_url = self::get_quick_rsvp_url( $post_id, intval( $user->ID ), 'maybe' );
+        $rsvp_no_url = self::get_quick_rsvp_url( $post_id, intval( $user->ID ), 'no' );
+        $buttons_markup = self::get_rsvp_buttons_markup( $rsvp_yes_url, $rsvp_maybe_url, $rsvp_no_url );
+        $buttons_token = '[[BAND_EVENT_RSVP_BUTTONS]]';
+
         $replacements = array(
             '{display_name}'   => (string) $user->display_name,
             '{event_title}'    => (string) $post->post_title,
@@ -77,9 +84,44 @@ class Band_Event_RSVP_Reminder {
             '{event_url}'      => (string) get_permalink( $post_id ),
             '{site_name}'      => (string) get_bloginfo( 'name' ),
             '{site_url}'       => (string) home_url(),
+            '{rsvp_yes_url}'   => $rsvp_yes_url,
+            '{rsvp_maybe_url}' => $rsvp_maybe_url,
+            '{rsvp_no_url}'    => $rsvp_no_url,
+            '{rsvp_buttons}'   => $buttons_token,
         );
 
-        return strtr( $template, $replacements );
+        $message = strtr( $template, $replacements );
+        $message = nl2br( esc_html( $message ) );
+        $message = str_replace( esc_html( $buttons_token ), $buttons_markup, $message );
+        $message = wp_kses_post( $message );
+
+        return $message;
+    }
+
+    protected static function get_quick_rsvp_url( $post_id, $user_id, $status ) {
+        $post_id = absint( $post_id );
+        $user_id = absint( $user_id );
+        $status = sanitize_key( (string) $status );
+
+        if ( $post_id <= 0 || $user_id <= 0 || ! in_array( $status, array( 'yes', 'maybe', 'no' ), true ) ) {
+            return '';
+        }
+
+        $args = array(
+            'band_event_rsvp_quick' => 1,
+            'band_event_id'         => $post_id,
+            'band_event_user_id'    => $user_id,
+            'band_event_response'   => $status,
+            '_wpnonce'              => wp_create_nonce( 'band_event_quick_rsvp_' . $post_id . '_' . $user_id . '_' . $status ),
+        );
+
+        return add_query_arg( $args, get_permalink( $post_id ) );
+    }
+
+    protected static function get_rsvp_buttons_markup( $yes_url, $maybe_url, $no_url ) {
+        return '<a href="' . esc_url( $yes_url ) . '" style="display:inline-block;margin:0 8px 8px 0;padding:10px 14px;background:#27ae60;color:#fff;text-decoration:none;border-radius:4px;font-weight:600;">Yes</a>'
+            . '<a href="' . esc_url( $maybe_url ) . '" style="display:inline-block;margin:0 8px 8px 0;padding:10px 14px;background:#f1c40f;color:#111;text-decoration:none;border-radius:4px;font-weight:600;">Maybe</a>'
+            . '<a href="' . esc_url( $no_url ) . '" style="display:inline-block;margin:0 8px 8px 0;padding:10px 14px;background:#e74c3c;color:#fff;text-decoration:none;border-radius:4px;font-weight:600;">No</a>';
     }
 
     protected static function send_event_emails( $post_id, $recipient_ids, $subject, $track_as_reminder ) {
@@ -112,7 +154,7 @@ class Band_Event_RSVP_Reminder {
                 continue;
             }
 
-            $headers = array( 'Content-Type: text/plain; charset=UTF-8' );
+            $headers = array( 'Content-Type: text/html; charset=UTF-8' );
             wp_mail( $user->user_email, $subject, $message, $headers );
 
             $sent_count++;
@@ -209,7 +251,7 @@ class Band_Event_RSVP_Reminder {
 
         $hours = self::get_reminder_hours();
         $now = current_time( 'mysql' );
-        $future = date( 'Y-m-d H:i:s', strtotime( "${hours} hours" ) );
+        $future = date( 'Y-m-d H:i:s', strtotime( "{$hours} hours" ) );
 
         $events = get_posts( array(
             'post_type'      => 'event',
