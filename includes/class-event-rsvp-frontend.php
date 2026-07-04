@@ -6,6 +6,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class Band_Event_RSVP_Frontend {
     protected static $current_loop_event_id = 0;
+    protected static $current_block_context_event_id = 0;
+    protected static $last_event_query_post_ids = array();
+    protected static $contextless_sequence_index = -1;
+    protected static $contextless_current_event_id = 0;
 
     public static function init() {
         add_shortcode( 'band_event_list', array( __CLASS__, 'render_event_list' ) );
@@ -27,6 +31,419 @@ class Band_Event_RSVP_Frontend {
         add_action( 'pre_get_posts', array( __CLASS__, 'filter_event_archive_query' ) );
         add_filter( 'the_posts', array( __CLASS__, 'filter_event_posts_by_invitation' ), 10, 2 );
         add_filter( 'the_content', array( __CLASS__, 'render_single_event_content' ) );
+        add_action( 'init', array( __CLASS__, 'ensure_shortcode_block_uses_post_context' ), 20 );
+        add_filter( 'render_block_context', array( __CLASS__, 'capture_event_id_from_render_block_context' ), 10, 3 );
+        add_filter( 'pre_render_block', array( __CLASS__, 'pre_render_shortcodes_in_query_loop_context' ), 10, 3 );
+        add_filter( 'render_block_core/shortcode', array( __CLASS__, 'render_shortcode_block_with_query_loop_context' ), 10, 3 );
+        add_filter( 'render_block_core/post-template', array( __CLASS__, 'fix_contextless_event_datetime_output' ), 20, 3 );
+        add_filter( 'render_block_core/query', array( __CLASS__, 'fix_query_loop_event_datetime_output' ), 20, 3 );
+    }
+
+    protected static function get_event_ids_from_query_block_attrs( $parsed_block ) {
+        if ( ! is_array( $parsed_block ) || empty( $parsed_block['attrs']['query'] ) || ! is_array( $parsed_block['attrs']['query'] ) ) {
+            return array();
+        }
+
+        $query = $parsed_block['attrs']['query'];
+        $post_type = isset( $query['postType'] ) ? sanitize_key( (string) $query['postType'] ) : 'post';
+        if ( 'event' !== $post_type ) {
+            return array();
+        }
+
+        $order = isset( $query['order'] ) ? strtoupper( sanitize_text_field( (string) $query['order'] ) ) : 'DESC';
+        if ( ! in_array( $order, array( 'ASC', 'DESC' ), true ) ) {
+            $order = 'DESC';
+        }
+
+        $orderby = isset( $query['orderBy'] ) ? sanitize_key( (string) $query['orderBy'] ) : 'date';
+        $allowed_orderby = array( 'date', 'title', 'modified', 'menu_order', 'rand', 'meta_value', 'meta_value_num' );
+        if ( ! in_array( $orderby, $allowed_orderby, true ) ) {
+            $orderby = 'date';
+        }
+
+        $per_page = isset( $query['perPage'] ) ? intval( $query['perPage'] ) : 10;
+        if ( 0 === $per_page ) {
+            $per_page = 10;
+        }
+
+        $offset = isset( $query['offset'] ) ? max( 0, intval( $query['offset'] ) ) : 0;
+
+        $query_args = array(
+            'post_type'              => 'event',
+            'post_status'            => 'publish',
+            'fields'                 => 'ids',
+            'posts_per_page'         => $per_page,
+            'offset'                 => $offset,
+            'orderby'                => $orderby,
+            'order'                  => $order,
+            'ignore_sticky_posts'    => true,
+            'no_found_rows'          => true,
+            'update_post_meta_cache' => false,
+            'update_post_term_cache' => false,
+        );
+
+        if ( isset( $query['exclude'] ) && is_array( $query['exclude'] ) && ! empty( $query['exclude'] ) ) {
+            $query_args['post__not_in'] = array_values( array_filter( array_map( 'absint', $query['exclude'] ) ) );
+        }
+
+        if ( isset( $query['author'] ) && '' !== (string) $query['author'] ) {
+            $query_args['author'] = intval( $query['author'] );
+        }
+
+        $event_query = new WP_Query( $query_args );
+        if ( empty( $event_query->posts ) || ! is_array( $event_query->posts ) ) {
+            return array();
+        }
+
+        $event_ids = array();
+        foreach ( $event_query->posts as $event_id ) {
+            $event_id = absint( $event_id );
+            if ( $event_id > 0 && self::can_current_user_view_event( $event_id ) ) {
+                $event_ids[] = $event_id;
+            }
+        }
+
+        return array_values( array_unique( $event_ids ) );
+    }
+
+    protected static function rewrite_event_datetime_markup_by_ids( $block_content, $event_ids ) {
+        if ( ! is_string( $block_content ) || '' === $block_content || empty( $event_ids ) ) {
+            return $block_content;
+        }
+
+        $row_index = -1;
+        $pattern = '/<span class="band-event-(start|end)-datetime">.*?<\/span>(?:<span class="band-event-shortcode-debug"[^>]*data-shortcode="band_event_(start|end)_datetime"[^>]*><\/span>)?/s';
+
+        $rewritten = preg_replace_callback(
+            $pattern,
+            function ( $matches ) use ( $event_ids, &$row_index ) {
+                $type = isset( $matches[1] ) ? (string) $matches[1] : '';
+
+                if ( 'start' === $type ) {
+                    $row_index++;
+                }
+
+                if ( $row_index < 0 ) {
+                    $row_index = 0;
+                }
+
+                $max_index = count( $event_ids ) - 1;
+                if ( $row_index > $max_index ) {
+                    $row_index = $max_index;
+                }
+
+                $post_id = absint( $event_ids[ $row_index ] );
+                $fields = Band_Event_RSVP_CPT::get_event_fields( $post_id );
+
+                if ( 'start' === $type ) {
+                    $formatted = Band_Event_RSVP_Frontend::format_event_datetime_human( $fields['start'] );
+                    return '<span class="band-event-start-datetime">' . esc_html( $formatted ) . '</span>' . Band_Event_RSVP_Frontend::get_shortcode_debug_marker( 'band_event_start_datetime', $post_id );
+                }
+
+                $formatted = Band_Event_RSVP_Frontend::format_event_datetime_human( $fields['end'] );
+                return '<span class="band-event-end-datetime">' . esc_html( $formatted ) . '</span>' . Band_Event_RSVP_Frontend::get_shortcode_debug_marker( 'band_event_end_datetime', $post_id );
+            },
+            $block_content
+        );
+
+        return is_string( $rewritten ) ? $rewritten : $block_content;
+    }
+
+    public static function fix_contextless_event_datetime_output( $block_content, $parsed_block, $instance ) {
+        if ( ! is_string( $block_content ) || '' === $block_content ) {
+            return $block_content;
+        }
+
+        if ( false === strpos( $block_content, 'band-event-start-datetime' ) && false === strpos( $block_content, 'band-event-end-datetime' ) ) {
+            return $block_content;
+        }
+
+        if ( empty( self::$last_event_query_post_ids ) || ! is_array( self::$last_event_query_post_ids ) ) {
+            return $block_content;
+        }
+
+        $event_ids = array_values( array_filter( array_map( 'absint', self::$last_event_query_post_ids ) ) );
+        if ( count( $event_ids ) <= 1 ) {
+            return $block_content;
+        }
+
+        return self::rewrite_event_datetime_markup_by_ids( $block_content, $event_ids );
+    }
+
+    public static function fix_query_loop_event_datetime_output( $block_content, $parsed_block, $instance ) {
+        if ( ! is_string( $block_content ) || '' === $block_content ) {
+            return $block_content;
+        }
+
+        if ( false === strpos( $block_content, 'band-event-start-datetime' ) && false === strpos( $block_content, 'band-event-end-datetime' ) ) {
+            return $block_content;
+        }
+
+        $event_ids = self::get_event_ids_from_query_block_attrs( $parsed_block );
+        if ( empty( $event_ids ) ) {
+            return $block_content;
+        }
+
+        self::$last_event_query_post_ids = $event_ids;
+        self::$contextless_sequence_index = -1;
+        self::$contextless_current_event_id = 0;
+
+        return self::rewrite_event_datetime_markup_by_ids( $block_content, $event_ids );
+    }
+
+    public static function capture_event_id_from_render_block_context( $context, $parsed_block, $parent_block ) {
+        if ( ! is_array( $context ) || ! isset( $context['postId'] ) ) {
+            return $context;
+        }
+
+        $context_post_id = absint( $context['postId'] );
+        if ( $context_post_id > 0 && 'event' === get_post_type( $context_post_id ) ) {
+            self::$current_block_context_event_id = $context_post_id;
+        }
+
+        return $context;
+    }
+
+    protected static function get_event_id_from_wp_query_cursor() {
+        global $wp_query;
+        if ( ! ( $wp_query instanceof WP_Query ) ) {
+            return 0;
+        }
+
+        if ( ! isset( $wp_query->current_post, $wp_query->posts ) || ! is_array( $wp_query->posts ) ) {
+            return 0;
+        }
+
+        $loop_index = intval( $wp_query->current_post );
+        if ( $loop_index < 0 || ! isset( $wp_query->posts[ $loop_index ] ) || ! ( $wp_query->posts[ $loop_index ] instanceof WP_Post ) ) {
+            return 0;
+        }
+
+        $candidate_id = absint( $wp_query->posts[ $loop_index ]->ID );
+        if ( $candidate_id <= 0 || 'event' !== get_post_type( $candidate_id ) ) {
+            return 0;
+        }
+
+        return $candidate_id;
+    }
+
+    protected static function get_event_id_from_contextless_sequence( $shortcode_tag ) {
+        if ( empty( self::$last_event_query_post_ids ) || ! is_array( self::$last_event_query_post_ids ) ) {
+            return 0;
+        }
+
+        $is_row_starter = in_array(
+            (string) $shortcode_tag,
+            array( 'band_event_start_datetime', 'band_event_detail', 'band_event_actions' ),
+            true
+        );
+
+        if ( $is_row_starter || self::$contextless_current_event_id <= 0 ) {
+            self::$contextless_sequence_index++;
+            if ( self::$contextless_sequence_index < 0 ) {
+                self::$contextless_sequence_index = 0;
+            }
+
+            $max_index = count( self::$last_event_query_post_ids ) - 1;
+            if ( self::$contextless_sequence_index > $max_index ) {
+                self::$contextless_sequence_index = $max_index;
+            }
+
+            $candidate_id = absint( self::$last_event_query_post_ids[ self::$contextless_sequence_index ] );
+            if ( $candidate_id > 0 && 'event' === get_post_type( $candidate_id ) ) {
+                self::$contextless_current_event_id = $candidate_id;
+            }
+        }
+
+        if ( self::$contextless_current_event_id > 0 && 'event' === get_post_type( self::$contextless_current_event_id ) ) {
+            return self::$contextless_current_event_id;
+        }
+
+        return 0;
+    }
+
+    public static function ensure_shortcode_block_uses_post_context() {
+        if ( ! class_exists( 'WP_Block_Type_Registry' ) ) {
+            return;
+        }
+
+        $registry = WP_Block_Type_Registry::get_instance();
+        $shortcode_block = $registry->get_registered( 'core/shortcode' );
+        if ( ! $shortcode_block ) {
+            return;
+        }
+
+        $uses_context = array();
+        if ( isset( $shortcode_block->uses_context ) && is_array( $shortcode_block->uses_context ) ) {
+            $uses_context = $shortcode_block->uses_context;
+        }
+
+        if ( ! in_array( 'postId', $uses_context, true ) ) {
+            $uses_context[] = 'postId';
+        }
+        if ( ! in_array( 'postType', $uses_context, true ) ) {
+            $uses_context[] = 'postType';
+        }
+
+        $shortcode_block->uses_context = array_values( array_unique( $uses_context ) );
+    }
+
+    public static function pre_render_shortcodes_in_query_loop_context( $pre_render, $parsed_block, $parent_block ) {
+        if ( null !== $pre_render || ! is_array( $parsed_block ) ) {
+            return $pre_render;
+        }
+
+        if ( empty( $parsed_block['blockName'] ) || 'core/shortcode' !== $parsed_block['blockName'] ) {
+            return $pre_render;
+        }
+
+        $raw_content = self::get_shortcode_block_raw_content( $parsed_block );
+        if ( '' === $raw_content || false === strpos( $raw_content, '[band_event_' ) ) {
+            return $pre_render;
+        }
+
+        $context_post_id = self::extract_event_id_from_block_context( $parent_block );
+        return self::render_band_event_shortcodes_with_context( $raw_content, $context_post_id );
+    }
+
+    public static function render_shortcode_block_with_query_loop_context( $block_content, $parsed_block, $instance ) {
+        if ( ! is_array( $parsed_block ) ) {
+            return $block_content;
+        }
+
+        $raw_content = self::get_shortcode_block_raw_content( $parsed_block );
+        if ( '' === $raw_content || false === strpos( $raw_content, '[band_event_' ) ) {
+            return $block_content;
+        }
+
+        $context_post_id = self::extract_event_id_from_block_context( $instance );
+        return self::render_band_event_shortcodes_with_context( $raw_content, $context_post_id );
+    }
+
+    protected static function get_shortcode_block_raw_content( $parsed_block ) {
+        if ( ! is_array( $parsed_block ) ) {
+            return '';
+        }
+
+        if ( isset( $parsed_block['attrs']['text'] ) && is_scalar( $parsed_block['attrs']['text'] ) ) {
+            return (string) $parsed_block['attrs']['text'];
+        }
+
+        if ( isset( $parsed_block['innerHTML'] ) && is_string( $parsed_block['innerHTML'] ) && '' !== $parsed_block['innerHTML'] ) {
+            return $parsed_block['innerHTML'];
+        }
+
+        if ( isset( $parsed_block['innerContent'] ) && is_array( $parsed_block['innerContent'] ) ) {
+            $fragments = array_filter( $parsed_block['innerContent'], 'is_string' );
+            return implode( '', $fragments );
+        }
+
+        return '';
+    }
+
+    protected static function extract_event_id_from_block_context( $block_instance ) {
+        if ( ! is_object( $block_instance ) || ! isset( $block_instance->context['postId'] ) ) {
+            return 0;
+        }
+
+        $context_post_id = absint( $block_instance->context['postId'] );
+        if ( $context_post_id <= 0 || 'event' !== get_post_type( $context_post_id ) ) {
+            return 0;
+        }
+
+        return $context_post_id;
+    }
+
+    protected static function render_band_event_shortcodes_with_context( $raw_content, $context_post_id ) {
+        $shortcode_content = (string) $raw_content;
+        if ( $context_post_id > 0 ) {
+            $shortcode_content = preg_replace_callback(
+                '/\[(band_event_[a-z0-9_]+)([^\]]*)\]/i',
+                function ( $matches ) use ( $context_post_id ) {
+                    $tag = isset( $matches[1] ) ? (string) $matches[1] : '';
+                    $attrs = isset( $matches[2] ) ? (string) $matches[2] : '';
+
+                    if ( '' === $tag ) {
+                        return '[' . $tag . $attrs . ']';
+                    }
+
+                    if ( preg_match( '/\b(?:id|post_id|event_id)\s*=\s*/i', $attrs ) ) {
+                        return '[' . $tag . $attrs . ']';
+                    }
+
+                    $trimmed_attrs = rtrim( $attrs );
+                    $self_closing = '';
+                    if ( '' !== $trimmed_attrs && '/' === substr( $trimmed_attrs, -1 ) ) {
+                        $trimmed_attrs = rtrim( substr( $trimmed_attrs, 0, -1 ) );
+                        $self_closing = ' /';
+                    }
+
+                    $prefix = '' === $trimmed_attrs ? ' ' : ' ';
+                    return '[' . $tag . $trimmed_attrs . $prefix . 'id="' . intval( $context_post_id ) . '"' . $self_closing . ']';
+                },
+                $shortcode_content
+            );
+        }
+
+        $debug_marker = sprintf(
+            '<span class="band-event-debug-marker" data-band-event-context-post-id="%d" style="display:none !important;"></span>',
+            intval( $context_post_id )
+        );
+
+        $previous_context_event_id = self::$current_block_context_event_id;
+        $previous_global_post = isset( $GLOBALS['post'] ) ? $GLOBALS['post'] : null;
+
+        if ( $context_post_id > 0 ) {
+            self::$current_block_context_event_id = $context_post_id;
+            $context_post = get_post( $context_post_id );
+            if ( $context_post instanceof WP_Post ) {
+                $GLOBALS['post'] = $context_post;
+            }
+        }
+
+        $rendered = do_shortcode( shortcode_unautop( $shortcode_content ) );
+
+        if ( $previous_global_post instanceof WP_Post ) {
+            $GLOBALS['post'] = $previous_global_post;
+        } elseif ( array_key_exists( 'post', $GLOBALS ) ) {
+            unset( $GLOBALS['post'] );
+        }
+
+        self::$current_block_context_event_id = $previous_context_event_id;
+
+        return $rendered . $debug_marker;
+    }
+
+    protected static function should_render_shortcode_debug() {
+        return isset( $_GET['band_event_debug'] ) && '1' === (string) wp_unslash( $_GET['band_event_debug'] );
+    }
+
+    protected static function get_shortcode_debug_marker( $shortcode_tag, $post_id ) {
+        if ( ! self::should_render_shortcode_debug() ) {
+            return '';
+        }
+
+        $global_post_id = 0;
+        $global_post_type = '';
+        $contextless_current_event_id = absint( self::$contextless_current_event_id );
+        $contextless_sequence_index = intval( self::$contextless_sequence_index );
+        if ( isset( $GLOBALS['post'] ) && $GLOBALS['post'] instanceof WP_Post ) {
+            $global_post_id = intval( $GLOBALS['post']->ID );
+            $global_post_type = (string) $GLOBALS['post']->post_type;
+        }
+
+        return sprintf(
+            '<span class="band-event-shortcode-debug" data-shortcode="%s" data-post-id="%d" data-block-context-post-id="%d" data-loop-event-id="%d" data-query-cursor-event-id="%d" data-contextless-current-event-id="%d" data-contextless-sequence-index="%d" data-global-post-id="%d" data-global-post-type="%s" style="display:none !important;"></span>',
+            esc_attr( (string) $shortcode_tag ),
+            intval( $post_id ),
+            intval( self::$current_block_context_event_id ),
+            intval( self::$current_loop_event_id ),
+            intval( self::get_event_id_from_wp_query_cursor() ),
+            $contextless_current_event_id,
+            $contextless_sequence_index,
+            intval( $global_post_id ),
+            esc_attr( $global_post_type )
+        );
     }
 
     public static function capture_current_loop_event_id( $post ) {
@@ -67,7 +484,7 @@ class Band_Event_RSVP_Frontend {
 
     public static function render_add_to_calendar_button( $post_id ) {
         $url = self::get_calendar_download_url( $post_id );
-        return '<p class="band-event-calendar"><a class="band-event-calendar-link" href="' . esc_url( $url ) . '">' . esc_html__( 'Add to Calendar', 'band-event-rsvp' ) . '</a></p>';
+        return '<div class="band-event-calendar"><a class="band-event-calendar-link" href="' . esc_url( $url ) . '">' . esc_html__( 'Add to Calendar', 'band-event-rsvp' ) . '</a></div>';
     }
 
     public static function escape_ics_text( $text ) {
@@ -274,6 +691,19 @@ class Band_Event_RSVP_Frontend {
             if ( 'event' !== $post->post_type || self::can_current_user_view_event( $post->ID ) ) {
                 $visible_posts[] = $post;
             }
+        }
+
+        $visible_event_ids = array();
+        foreach ( $visible_posts as $visible_post ) {
+            if ( $visible_post instanceof WP_Post && 'event' === $visible_post->post_type ) {
+                $visible_event_ids[] = absint( $visible_post->ID );
+            }
+        }
+
+        if ( ! empty( $visible_event_ids ) ) {
+            self::$last_event_query_post_ids = array_values( array_unique( $visible_event_ids ) );
+            self::$contextless_sequence_index = -1;
+            self::$contextless_current_event_id = 0;
         }
 
         return $visible_posts;
@@ -600,18 +1030,62 @@ class Band_Event_RSVP_Frontend {
     public static function get_shortcode_event_post_id( $atts, $shortcode_tag ) {
         $atts = shortcode_atts(
             array(
-                'id' => 0,
+                'id'       => 0,
+                'post_id'  => 0,
+                'event_id' => 0,
             ),
             $atts,
             $shortcode_tag
         );
 
-        $post_id = self::resolve_event_post_id_from_context( $atts['id'] );
-        if ( $post_id <= 0 || 'event' !== get_post_type( $post_id ) ) {
-            return 0;
+        $explicit_ids = array(
+            absint( $atts['id'] ),
+            absint( $atts['post_id'] ),
+            absint( $atts['event_id'] ),
+        );
+
+        foreach ( $explicit_ids as $explicit_id ) {
+            if ( $explicit_id > 0 && 'event' === get_post_type( $explicit_id ) ) {
+                return $explicit_id;
+            }
         }
 
-        return $post_id;
+        if ( self::$current_block_context_event_id > 0 && 'event' === get_post_type( self::$current_block_context_event_id ) ) {
+            return self::$current_block_context_event_id;
+        }
+
+        $query_cursor_event_id = self::get_event_id_from_wp_query_cursor();
+        if ( $query_cursor_event_id > 0 ) {
+            return $query_cursor_event_id;
+        }
+
+        $contextless_event_id = self::get_event_id_from_contextless_sequence( $shortcode_tag );
+        if ( $contextless_event_id > 0 ) {
+            return $contextless_event_id;
+        }
+
+        // Prefer the current loop context before broad global fallbacks.
+        $context_post_id = self::resolve_event_post_id_from_context();
+        if ( $context_post_id > 0 && 'event' === get_post_type( $context_post_id ) ) {
+            return $context_post_id;
+        }
+
+        global $post;
+        if ( $post instanceof WP_Post && 'event' === $post->post_type ) {
+            return absint( $post->ID );
+        }
+
+        global $id;
+        $legacy_post_id = absint( $id );
+        if ( $legacy_post_id > 0 && 'event' === get_post_type( $legacy_post_id ) ) {
+            return $legacy_post_id;
+        }
+
+        if ( self::$current_loop_event_id > 0 && 'event' === get_post_type( self::$current_loop_event_id ) ) {
+            return self::$current_loop_event_id;
+        }
+
+        return 0;
     }
 
     public static function render_event_start_datetime_shortcode( $atts ) {
@@ -626,7 +1100,7 @@ class Band_Event_RSVP_Frontend {
         }
 
         $formatted = self::format_event_datetime_human( $fields['start'] );
-        return '<span class="band-event-start-datetime">' . esc_html( $formatted ) . '</span>';
+        return '<span class="band-event-start-datetime">' . esc_html( $formatted ) . '</span>' . self::get_shortcode_debug_marker( 'band_event_start_datetime', $post_id );
     }
 
     public static function render_event_end_datetime_shortcode( $atts ) {
@@ -641,7 +1115,7 @@ class Band_Event_RSVP_Frontend {
         }
 
         $formatted = self::format_event_datetime_human( $fields['end'] );
-        return '<span class="band-event-end-datetime">' . esc_html( $formatted ) . '</span>';
+        return '<span class="band-event-end-datetime">' . esc_html( $formatted ) . '</span>' . self::get_shortcode_debug_marker( 'band_event_end_datetime', $post_id );
     }
 
     public static function render_event_member_levels_shortcode( $atts ) {
@@ -717,50 +1191,62 @@ class Band_Event_RSVP_Frontend {
             return $explicit_id;
         }
 
-        $candidates = array();
-
-        if ( self::$current_loop_event_id > 0 ) {
-            $candidates[] = self::$current_loop_event_id;
+        if ( self::$current_block_context_event_id > 0 && 'event' === get_post_type( self::$current_block_context_event_id ) ) {
+            return self::$current_block_context_event_id;
         }
 
-        global $wp_query;
-        if ( $wp_query instanceof WP_Query && isset( $wp_query->current_post, $wp_query->posts ) ) {
-            $loop_index = intval( $wp_query->current_post );
-            if ( $loop_index >= 0 && isset( $wp_query->posts[ $loop_index ] ) && $wp_query->posts[ $loop_index ] instanceof WP_Post ) {
-                $candidates[] = absint( $wp_query->posts[ $loop_index ]->ID );
+        $query_cursor_event_id = self::get_event_id_from_wp_query_cursor();
+        if ( $query_cursor_event_id > 0 ) {
+            return $query_cursor_event_id;
+        }
+
+        $the_id = get_the_ID();
+        if ( $the_id ) {
+            $post_id = absint( $the_id );
+            if ( 'event' === get_post_type( $post_id ) ) {
+                return $post_id;
             }
+        }
+
+        if ( self::$current_loop_event_id > 0 && 'event' === get_post_type( self::$current_loop_event_id ) ) {
+            return self::$current_loop_event_id;
         }
 
         global $post;
         if ( $post instanceof WP_Post ) {
-            $candidates[] = absint( $post->ID );
-        }
-
-        if ( in_the_loop() ) {
-            $the_id = get_the_ID();
-            if ( $the_id ) {
-                $candidates[] = absint( $the_id );
+            $post_id = absint( $post->ID );
+            if ( 'event' === get_post_type( $post_id ) ) {
+                return $post_id;
             }
         }
 
         $current_post = get_post();
         if ( $current_post instanceof WP_Post ) {
-            $candidates[] = absint( $current_post->ID );
-        }
-
-        $queried_object_id = get_queried_object_id();
-        if ( $queried_object_id && is_singular( 'event' ) ) {
-            $candidates[] = absint( $queried_object_id );
+            $post_id = absint( $current_post->ID );
+            if ( 'event' === get_post_type( $post_id ) ) {
+                return $post_id;
+            }
         }
 
         $request_post_id = 0;
         if ( isset( $_REQUEST['post_id'] ) && is_scalar( $_REQUEST['post_id'] ) ) {
             $request_post_id = absint( wp_unslash( (string) $_REQUEST['post_id'] ) );
         }
-        if ( $request_post_id > 0 ) {
-            $candidates[] = $request_post_id;
+        if ( $request_post_id > 0 && 'event' === get_post_type( $request_post_id ) ) {
+            return $request_post_id;
         }
 
+        $queried_object_id = get_queried_object_id();
+        if ( $queried_object_id && is_singular( 'event' ) ) {
+            $post_id = absint( $queried_object_id );
+            if ( 'event' === get_post_type( $post_id ) ) {
+                return $post_id;
+            }
+        }
+
+        $candidates = array();
+
+        global $wp_query;
         if ( is_singular( 'event' ) && isset( $wp_query->post ) && $wp_query->post instanceof WP_Post ) {
             $candidates[] = absint( $wp_query->post->ID );
         }
@@ -786,6 +1272,10 @@ class Band_Event_RSVP_Frontend {
         }
 
         $fields = Band_Event_RSVP_CPT::get_event_fields( $post_id );
+        $selected_levels = Band_Event_RSVP_CPT::get_invited_membership_levels( $post_id );
+        $invited_levels_display = empty( $selected_levels )
+            ? __( 'No membership levels selected (no members invited)', 'band-event-rsvp' )
+            : self::get_invited_levels_display( $post_id );
         $archive_link = get_post_type_archive_link( 'event' );
         $output  = '<div class="band-event-detail">';
         // Back to events link for easier mobile navigation
@@ -803,7 +1293,7 @@ class Band_Event_RSVP_Frontend {
             $output .= '<li><strong>' . esc_html__( 'Recurring:', 'band-event-rsvp' ) . '</strong> ' . esc_html( sprintf( __( 'Every %d %s', 'band-event-rsvp' ), intval( $fields['recurring_count'] ), $fields['recurring_unit'] ) ) . '</li>';
         }
         $output .= '<li><strong>' . esc_html__( 'Contact:', 'band-event-rsvp' ) . '</strong> ' . esc_html( $fields['contact_person'] ) . '</li>';
-        $output .= '<li><strong>' . esc_html__( 'Invited levels:', 'band-event-rsvp' ) . '</strong> ' . esc_html( self::get_invited_levels_display( $post_id ) ) . '</li>';
+        $output .= '<li><strong>' . esc_html__( 'Invited levels:', 'band-event-rsvp' ) . '</strong> ' . esc_html( $invited_levels_display ) . '</li>';
         $output .= '</ul>';
         $output .= self::render_location_map_if_enabled( $fields );
         $output .= self::render_add_to_calendar_button( $post_id );

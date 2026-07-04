@@ -290,7 +290,29 @@ class Band_Event_RSVP_CPT {
     public static function get_all_member_user_ids() {
         if ( class_exists( 'SwpmMemberUtils' ) ) {
             global $wpdb;
-            $query = "SELECT wp_user_id, user_name, email FROM {$wpdb->prefix}swpm_members_tbl";
+            $table_name = $wpdb->prefix . 'swpm_members_tbl';
+            $available_columns = $wpdb->get_col( "SHOW COLUMNS FROM {$table_name}", 0 );
+
+            if ( ! is_array( $available_columns ) || empty( $available_columns ) ) {
+                $available_columns = array( 'user_name', 'email' );
+            }
+
+            $select_columns = array();
+            if ( in_array( 'wp_user_id', $available_columns, true ) ) {
+                $select_columns[] = 'wp_user_id';
+            }
+            if ( in_array( 'user_name', $available_columns, true ) ) {
+                $select_columns[] = 'user_name';
+            }
+            if ( in_array( 'email', $available_columns, true ) ) {
+                $select_columns[] = 'email';
+            }
+
+            if ( empty( $select_columns ) ) {
+                return array();
+            }
+
+            $query = 'SELECT ' . implode( ', ', $select_columns ) . " FROM {$table_name}";
             $members = $wpdb->get_results( $query );
             if ( is_array( $members ) ) {
                 $user_ids = array();
@@ -332,7 +354,7 @@ class Band_Event_RSVP_CPT {
         }
 
         if ( empty( $levels ) ) {
-            return self::get_all_member_user_ids();
+            return array();
         }
 
         return array();
